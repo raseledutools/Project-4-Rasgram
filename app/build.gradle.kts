@@ -116,9 +116,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // ==========================================
-    // 📞 WebRTC (For Audio & Video Calls)
+    // 📞 WebRTC (For Audio & Video Calls) - Updated to Stream WebRTC
     // ==========================================
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    implementation("io.getstream:stream-webrtc-android:1.1.1")
 
     // ==========================================
     // 🤖 ML Kit (For QR Code & OCR Text Recognition)
