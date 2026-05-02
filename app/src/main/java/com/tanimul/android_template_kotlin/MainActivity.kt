@@ -1,4 +1,3 @@
-
 package com.tanimul.android_template_kotlin
 
 import android.Manifest
@@ -1431,6 +1430,7 @@ fun sendMessage(
 }
 
 // ================== MESSAGE BUBBLE ==================
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: Message,
