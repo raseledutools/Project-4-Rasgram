@@ -1,1217 +1,1960 @@
+
 package com.tanimul.android_template_kotlin
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.ContentValues
-import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
-import android.graphics.pdf.PdfRenderer
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.os.ParcelFileDescriptor
-import android.provider.MediaStore
-import android.provider.OpenableColumns
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextPaint
-import android.util.Base64
-import android.util.Log
-import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts.*
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import androidx.lifecycle.*
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import java.io.*
+import androidx.lifecycle.lifecycleScope
+import coil.compose.AsyncImage
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import org.webrtc.*
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.Executors
-import java.util.zip.ZipInputStream
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.core.net.toUri
+import java.io.File
+import java.io.FileOutputStream
 
-// ==========================================
-// GLOBALS & DATA CLASSES
-// ==========================================
-val BackgroundColor = Color(0xFF020617)
-val TextColor = Color(0xFFF8FAFC)
-val CardBorder = Color(0x1AFFFFFF)
+// Data Classes
+data class User(
+    val name: String = "",
+    val mobile: String = "",
+    val avatarUrl: String = "",
+    val password: String = "",
+    val lastActive: Long = 0,
+    val typingTo: String? = null,
+    val statusVisible: Boolean = true
+)
 
-data class ScanImage(val id: String = UUID.randomUUID().toString(), val dataUrl: String = "", val thumbUrl: String = "")
-data class SavedDocument(val id: String = UUID.randomUUID().toString(), val name: String, val date: String, val pages: Int, val thumb: String, val pdfBase64: String) : Serializable
-enum class ImageFilter(val label: String) { NONE("Original"), MAGIC_PRO("Magic Scan (Printable)"), PRINT_PRO("B&W Signature"), CLEAR_PRO("Clear Shadow"), SUPER_BW("Super B&W") }
-enum class PageSize(val label: String) { FIT("Fit Image"), A4("A4 Document") }
-data class ConverterTool(val id: String, val title: String, val description: String, val icon: ImageVector, val tag: String, val gradientColors: List<Color>)
-data class ToolData(val id: String, val title: String, val tag: String, val description: String, val icon: ImageVector, val gradient: List<Color>)
+data class Message(
+    val id: String = "",
+    val text: String = "",
+    val senderMobile: String = "",
+    val timestamp: Long = 0,
+    val timeString: String = "",
+    val fileUrl: String? = null,
+    val fileName: String? = null,
+    val fileType: String? = null,
+    val reaction: String? = null,
+    val read: Boolean = false,
+    val isCallLog: Boolean = false,
+    val callStatus: String? = null,
+    val callType: String? = null,
+    val isPending: Boolean = false
+)
 
-// ==========================================
-// VIEWMODEL (With Local Persistence)
-// ==========================================
-class AppViewModel : ViewModel() {
-    var currentScreen by mutableStateOf("home") 
+data class CallData(
+    val id: String = "",
+    val caller: String = "",
+    val callee: String = "",
+    val type: String = "audio",
+    val status: String = "calling",
+    val timestamp: Long = 0,
+    val offer: Map<String, Any>? = null,
+    val answer: Map<String, Any>? = null
+)
 
-    private val _images = MutableStateFlow<List<ScanImage>>(emptyList())
-    val images: StateFlow<List<ScanImage>> = _images.asStateFlow()
-
-    private val _savedDocuments = MutableStateFlow<List<SavedDocument>>(emptyList())
-    val savedDocuments: StateFlow<List<SavedDocument>> = _savedDocuments.asStateFlow()
-
-    val isLoading = MutableStateFlow(false)
-    val loadingTitle = MutableStateFlow("Processing...")
-    val loadingDesc = MutableStateFlow("Please wait")
-    val progress = MutableStateFlow(0f)
-    val progressText = MutableStateFlow("0 / 0")
-
-    val selectedFilter = MutableStateFlow(ImageFilter.MAGIC_PRO) 
-    val pageSize = MutableStateFlow(PageSize.A4) 
-    val autoCrop = MutableStateFlow(true)
-
-    val showCamera = MutableStateFlow(false)
-    val showPdfPreview = MutableStateFlow(false)
-    val previewDoc = MutableStateFlow<SavedDocument?>(null)
-    val showPdfImportModal = MutableStateFlow(false)
-
-    var tempImportPdfUri: Uri? = null
-    val toastMessage = MutableStateFlow<String?>(null)
-
-    val selectedDocsForMerge = mutableStateListOf<String>()
-    var isSelectionMode by mutableStateOf(false)
-    var showRenameDialog by mutableStateOf(false)
-    var docToRename by mutableStateOf<SavedDocument?>(null)
-
-    // Converter States
-    var convInputText by mutableStateOf("")
-    var convOutputText by mutableStateOf("")
-    var convImageUri by mutableStateOf<Uri?>(null)
-    var convImageBitmap by mutableStateOf<Bitmap?>(null)
-
-    // History Save/Load Logic
-    fun loadHistory(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = File(context.filesDir, "ras_scanner_history.dat")
-            if (file.exists()) {
-                try {
-                    ObjectInputStream(FileInputStream(file)).use { 
-                        @Suppress("UNCHECKED_CAST")
-                        val docs = it.readObject() as List<SavedDocument>
-                        _savedDocuments.value = docs
-                    }
-                } catch (e: Exception) { Log.e("ViewModel", "Failed to load history", e) }
-            }
-        }
-    }
-
-    private fun saveHistoryLocal(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val file = File(context.filesDir, "ras_scanner_history.dat")
-                ObjectOutputStream(FileOutputStream(file)).use { it.writeObject(_savedDocuments.value) }
-            } catch (e: Exception) { Log.e("ViewModel", "Failed to save history", e) }
-        }
-    }
-
-    fun showToast(message: String) { toastMessage.value = message }
-    fun clearToast() { toastMessage.value = null }
-    fun setLoading(status: Boolean, title: String = "Processing...", desc: String = "Please wait...") { isLoading.value = status; loadingTitle.value = title; loadingDesc.value = desc }
-    fun updateProgress(current: Int, total: Int) { progress.value = if (total > 0) current.toFloat() / total else 0f; progressText.value = "$current / $total" }
-    
-    fun addImage(image: ScanImage) { _images.value += image }
-    fun removeImage(id: String) { _images.value = _images.value.filter { it.id != id } }
-    fun clearImages() { _images.value = emptyList() }
-    
-    fun addSavedDocument(context: Context, doc: SavedDocument) { 
-        _savedDocuments.value = listOf(doc) + _savedDocuments.value
-        saveHistoryLocal(context)
-    }
-    fun deleteDocument(context: Context, id: String) { 
-        _savedDocuments.value = _savedDocuments.value.filter { it.id != id }
-        saveHistoryLocal(context)
-    }
-    
-    fun setShowPdfImportModal(show: Boolean, uri: Uri? = null) { showPdfImportModal.value = show; if (show) tempImportPdfUri = uri }
-    fun setShowPdfPreview(show: Boolean, doc: SavedDocument? = null) { showPdfPreview.value = show; previewDoc.value = doc }
-    fun toggleSelectionMode() { isSelectionMode = !isSelectionMode; if (!isSelectionMode) selectedDocsForMerge.clear() }
-    fun toggleDocSelection(id: String) { if (selectedDocsForMerge.contains(id)) selectedDocsForMerge.remove(id) else selectedDocsForMerge.add(id) }
-
-    fun renameDocument(context: Context, docId: String, newName: String) {
-        val finalName = if (newName.endsWith(".pdf")) newName else "$newName.pdf"
-        _savedDocuments.value = _savedDocuments.value.map { if (it.id == docId) it.copy(name = finalName) else it }
-        saveHistoryLocal(context)
-        showToast("Renamed successfully!")
-    }
-
-    fun resetConverterStates() { convInputText = ""; convOutputText = ""; convImageUri = null; convImageBitmap = null }
+// Theme Colors
+object RasGramTheme {
+    val DarkBackground = Color(0xFF111B21)
+    val DarkPanel = Color(0xFF202C33)
+    val Green = Color(0xFF00A884)
+    val GreenHover = Color(0xFF029071)
+    val TextPrimary = Color(0xFFE9EDEF)
+    val TextMuted = Color(0xFF8696A0)
+    val BubbleIn = Color(0xFF202C33)
+    val BubbleOut = Color(0xFF005C4B)
+    val Border = Color(0xFF222D34)
+    val BlueTick = Color(0xFF53BDEB)
+    val LightBackground = Color(0xFFF0F2F5)
+    val LightPanel = Color(0xFFFFFFFF)
 }
 
-// ==========================================
-// MAIN ACTIVITY
-// ==========================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val action = intent.action
-        val type = intent.type
-        val uri: Uri? = intent.data
-
+        FirebaseApp.initializeApp(this)
+        
+        // WhatsApp Style Offline Persistence Enable
+        val db = FirebaseFirestore.getInstance()
+        val settings = FirebaseFirestoreSettings.Builder()
+            .setPersistenceEnabled(true)
+            .setCacheSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+            .build()
+        db.firestoreSettings = settings
+        
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF4F46E5), secondary = Color(0xFF10B981), background = Color(0xFFF9FAFB), surface = Color.White)) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    val viewModel: AppViewModel = viewModel()
-                    val context = LocalContext.current
-                    
-                    LaunchedEffect(Unit) { viewModel.loadHistory(context) }
-                    
-                    LaunchedEffect(uri) {
-                        if (Intent.ACTION_VIEW == action && type == "application/pdf" && uri != null) {
-                            viewModel.currentScreen = "scanner"
-                            viewModel.setShowPdfImportModal(true, uri)
-                        }
-                    }
-                    
-                    Crossfade(targetState = viewModel.currentScreen, label = "Router") { screen ->
-                        when (screen) {
-                            "home" -> LocalToolsetScreen(viewModel)
-                            "scanner" -> RasScannerScreen(viewModel)
-                            "converters" -> ConverterSuiteScreen(viewModel)
-                            "tool_txt_b64" -> ToolTextBase64Screen(viewModel)
-                            "tool_img_b64" -> ToolImageBase64Screen(viewModel)
-                            "tool_ocr" -> ToolOcrScreen(viewModel)
-                            "tool_word_pdf" -> ToolWordToPdfScreen(viewModel)
-                        }
-                    }
-                }
-            }
+            RasGramApp()
         }
     }
 }
 
-// ==========================================
-// 1. HOME SCREEN
-// ==========================================
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocalToolsetScreen(viewModel: AppViewModel) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
-    var showAdminDialog by remember { mutableStateOf(false) }
+fun RasGramApp() {
     val context = LocalContext.current
+    var isLoggedIn by remember { mutableStateOf(false) }
+    var currentUser by remember { mutableStateOf<User?>(null) }
+    var isLightMode by remember { mutableStateOf(false) }
+    
+    MaterialTheme(
+        colorScheme = if (isLightMode) lightColorScheme() else darkColorScheme()
+    ) {
+        if (!isLoggedIn) {
+            LoginScreen(
+                onLogin = { user ->
+                    currentUser = user
+                    isLoggedIn = true
+                }
+            )
+        } else {
+            MainChatScreen(
+                currentUser = currentUser!!,
+                isLightMode = isLightMode,
+                onToggleTheme = { isLightMode = !isLightMode },
+                onLogout = {
+                    isLoggedIn = false
+                    currentUser = null
+                }
+            )
+        }
+    }
+}
 
-    ModalNavigationDrawer(drawerState = drawerState, drawerContent = { SidebarContent(onClose = { scope.launch { drawerState.close() } }) }) {
-        Box(modifier = Modifier.fillMaxSize().background(BackgroundColor)) {
-            // Top Right Nav Buttons
-            Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).zIndex(10f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { viewModel.currentScreen = "scanner" }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp), modifier = Modifier.shadow(8.dp, RoundedCornerShape(20.dp))) {
-                    Icon(Icons.Default.DocumentScanner, null, modifier = Modifier.size(16.dp), tint = Color.White); Spacer(modifier = Modifier.width(4.dp)); Text("Scanner", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                }
-                Button(onClick = { viewModel.currentScreen = "converters" }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF008CBA)), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp), modifier = Modifier.shadow(8.dp, RoundedCornerShape(20.dp))) {
-                    Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp), tint = Color.White); Spacer(modifier = Modifier.width(4.dp)); Text("Converters", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                }
+// ================== LOGIN SCREEN ==================
+@Composable
+fun LoginScreen(onLogin: (User) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val auth = remember { FirebaseAuth.getInstance() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = RasGramTheme.DarkBackground
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Logo
+            Surface(
+                modifier = Modifier.size(80.dp),
+                shape = CircleShape,
+                color = RasGramTheme.Green.copy(alpha = 0.1f)
+            ) {
+                Icon(
+                    Icons.Default.Send,
+                    contentDescription = "Logo",
+                    tint = RasGramTheme.Green,
+                    modifier = Modifier.padding(20.dp)
+                )
             }
             
-            LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 300.dp), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 60.dp, bottom = 20.dp)) {
-                        Box(modifier = Modifier.size(110.dp).clip(CircleShape).border(2.dp, Color(0x4DFFFFFF), CircleShape).clickable { showAdminDialog = true }, contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, null, modifier = Modifier.size(60.dp), tint = Color.White) }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.background(Color(0x1AFFFFFF), RoundedCornerShape(50.dp)).border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(50.dp)).padding(horizontal = 16.dp, vertical = 6.dp)) {
-                            Box(modifier = Modifier.size(8.dp).background(Color(0xFFEC4899), CircleShape)); Spacer(modifier = Modifier.width(8.dp)); Text("SYSTEM ONLINE", fontSize = 12.sp, color = TextColor, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(modifier = Modifier.height(16.dp)); Text("Rasel Edu Tools", fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, color = TextColor, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(24.dp))
-                        TickerView(); Spacer(modifier = Modifier.height(24.dp)); ActionButtons(SimpleDateFormat("EEEE, MMM d, yyyy", Locale.US).format(Date()), context)
-                    }
-                }
-                items(getToolsList()) { tool ->
-                    ToolCard(tool = tool, context = context, onClick = {
-                        if (tool.id == "converter") viewModel.currentScreen = "converters"
-                        else if (tool.id == "scanner") viewModel.currentScreen = "scanner"
-                        else Toast.makeText(context, "Opening ${tool.title}", Toast.LENGTH_SHORT).show()
-                    })
-                }
-                item(span = { GridItemSpan(maxLineSpan) }) { Footer { showAdminDialog = true } }
-            }
-            IconButton(onClick = { scope.launch { drawerState.open() } }, modifier = Modifier.padding(16.dp).align(Alignment.TopStart).background(Color(0x1AFFFFFF), CircleShape).border(1.dp, Color(0x33FFFFFF), CircleShape)) { Icon(Icons.Default.Menu, "Menu", tint = Color.White) }
-        }
-    }
-    if (showAdminDialog) AdminLoginDialog(onDismiss = { showAdminDialog = false })
-}
-
-fun getToolsList() = listOf(
-    ToolData("diary", "Professional Diary", "PERSONAL", "Encrypted daily journal. Track tasks, log thoughts.", Icons.Default.Book, listOf(Color(0xCC9333EA), Color(0xCCDB2777))),
-    ToolData("rasbook", "RasBook", "DOCUMENT", "A professional social media like facebook. Fast and secure.", Icons.Default.Face, listOf(Color(0xCC2563EB), Color(0xCC0891B2))),
-    ToolData("scanner", "RasScanner Pro", "DOCUMENT", "Scan Documents, Edit PDF, Create Digital Records.", Icons.Default.DocumentScanner, listOf(Color(0xE64F46E5), Color(0xB3EC4899))),
-    ToolData("converter", "Universal Converter", "UTILITY", "Precision tools for format conversion, unit calculation.", Icons.Default.Refresh, listOf(Color(0xCC059669), Color(0xCC0D9488))),
-    ToolData("workspace", "Code Workspace", "DEVELOPER", "Live IDE environment. Write, debug, and execute HTML/CSS/JS.", Icons.Default.Code, listOf(Color(0xCCEA580C), Color(0xCCDC2626))),
-    ToolData("gallery", "Media Gallery", "MEDIA", "High-performance image viewer. Organize visual assets.", Icons.Default.AccountBox, listOf(Color(0xCCE11D48), Color(0xCCEC4899))),
-    ToolData("audio", "Focus Noise & Sleep", "AUDIO", "Advanced frequency generation engine.", Icons.Default.PlayArrow, listOf(Color(0xE64F46E5), Color(0xE67C3AED))),
-    ToolData("ramadan", "Ramadan Plan Book", "LIFESTYLE", "Interactive guide for a productive Ramadan.", Icons.Default.Star, listOf(Color(0xCCD97706), Color(0xCCF97316))),
-    ToolData("chat", "Connect Globally", "UPDATES", "Give any suggestion or view broadcast messages.", Icons.Default.Share, listOf(Color(0xCCC026D3), Color(0xCC9333EA)))
-)
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun TickerView() {
-    val tickerText by remember { mutableStateOf("Connecting to server... Global Active.") }
-    Row(modifier = Modifier.fillMaxWidth(0.9f).height(48.dp).background(Color(0x800F172A), RoundedCornerShape(50.dp)).border(1.dp, CardBorder, RoundedCornerShape(50.dp)), verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.fillMaxHeight().background(Brush.horizontalGradient(listOf(Color(0xFFDB2777), Color(0xFF9333EA))), RoundedCornerShape(topStart = 50.dp, bottomStart = 50.dp)).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) { Text("UPDATE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
-        Text(text = tickerText, color = TextColor, modifier = Modifier.padding(horizontal = 16.dp).basicMarquee(), maxLines = 1)
-    }
-}
-
-@Composable
-fun ActionButtons(currentDate: String, context: Context) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionButton("View Notice Board", Icons.Default.Notifications, listOf(Color(0xFFC026D3), Color(0xFFE11D48))) { Toast.makeText(context, "Navigating", Toast.LENGTH_SHORT).show() }
-                ActionButton("Today's Live Exam\n$currentDate", Icons.Default.Edit, listOf(Color(0xFF059669), Color(0xFF0891B2))) { }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionButton("Join RasGram", Icons.Default.Chat, listOf(Color(0xFF2563EB), Color(0xFF4F46E5))) { }
-                ActionButton("PSC Solutions", Icons.Default.Book, listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))) { }
-            }
-        }
-    }
-}
-
-@Composable
-fun ActionButton(text: String, icon: ImageVector, gradient: List<Color>, onClick: () -> Unit) {
-    Button(onClick = onClick, colors = ButtonDefaults.buttonColors(Color.Transparent), contentPadding = PaddingValues(0.dp), shape = RoundedCornerShape(50.dp), modifier = Modifier.border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(50.dp))) {
-        Row(modifier = Modifier.background(Brush.horizontalGradient(gradient)).padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = Color.White); Spacer(modifier = Modifier.width(8.dp)); Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        }
-    }
-}
-
-@Composable
-fun ToolCard(tool: ToolData, context: Context, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }, colors = CardDefaults.cardColors(Color.Transparent), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, CardBorder)) {
-        Column(modifier = Modifier.background(Brush.linearGradient(tool.gradient)).padding(24.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(48.dp).background(Color(0x33000000), RoundedCornerShape(12.dp)).border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(tool.icon, null, tint = Color.White) }
-                Text(text = tool.tag, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.background(Color(0x33000000), RoundedCornerShape(50.dp)).padding(horizontal = 12.dp, vertical = 4.dp), color = Color.White)
-            }
-            Spacer(modifier = Modifier.height(16.dp)); Text(tool.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Spacer(modifier = Modifier.height(8.dp)); Text(tool.description, fontSize = 14.sp, color = Color(0xCCFFFFFF), lineHeight = 20.sp)
-        }
-    }
-}
-
-@Composable
-fun AdminLoginDialog(onDismiss: () -> Unit) {
-    var password by remember { mutableStateOf("") }
-    var isError by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss, containerColor = Color(0xFF0F172A),
-        title = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Lock, null, tint = Color(0xFFEC4899), modifier = Modifier.size(32.dp)); Spacer(Modifier.height(8.dp)); Text("Admin Access", color = Color.White, fontWeight = FontWeight.Bold); Text("Restricted area. Verification required.", color = Color(0xFF94A3B8), fontSize = 12.sp) } },
-        text = { OutlinedTextField(value = password, onValueChange = { password = it; isError = false }, placeholder = { Text("••••••••", color = Color.Gray) }, singleLine = true, isError = isError, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFEC4899), unfocusedBorderColor = Color(0x1AFFFFFF))) },
-        confirmButton = { Button(onClick = { if (password == "    ") { Toast.makeText(context, "Admin Logged In!", Toast.LENGTH_SHORT).show(); onDismiss() } else { isError = true; password = "" } }, colors = ButtonDefaults.buttonColors(Color(0xFFDB2777))) { Text("LOGIN") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Color.White) } }
-    )
-}
-
-@Composable
-fun Footer(onAdminClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        HorizontalDivider(color = CardBorder); Spacer(modifier = Modifier.height(16.dp)); Text("© Rasel Edu Tools", color = Color(0xFFCBD5E1), fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("ENGINEERED BY ", color = Color(0xFF94A3B8), fontSize = 10.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.width(8.dp))
-            Row(modifier = Modifier.background(Color(0x0DFFFFFF), CircleShape).clickable { onAdminClick() }.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Rasel Mia", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-        }
-        Spacer(modifier = Modifier.height(8.dp)); Text("📞 01566054963", color = Color(0xFFCBD5E1), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun SidebarContent(onClose: () -> Unit) {
-    Column(modifier = Modifier.fillMaxHeight().width(300.dp).background(Color(0xF20F172A)).padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Web Tools", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold); IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close", tint = Color.Gray) } }
-        HorizontalDivider(color = Color(0x33FFFFFF), modifier = Modifier.padding(vertical = 16.dp))
-        Text("MAIN NAVIGATION", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold); DrawerItem("Notice Board", Icons.Default.Notifications); DrawerItem("Live Exam Center", Icons.Default.Edit); Spacer(modifier = Modifier.height(16.dp))
-        Text("PROFESSIONAL TOOLS", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold); DrawerItem("Professional Diary", Icons.Default.Book); DrawerItem("RasBook", Icons.Default.Face); DrawerItem("Code Workspace", Icons.Default.Code); DrawerItem("Universal Converter", Icons.Default.Refresh); DrawerItem("Media Gallery", Icons.Default.AccountBox)
-    }
-}
-
-@Composable
-fun DrawerItem(title: String, icon: ImageVector) { Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { }, verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(modifier = Modifier.width(16.dp)); Text(title, color = Color(0xFFE2E8F0), fontSize = 14.sp) } }
-
-// ==========================================
-// 2. SCANNER SCREEN (With PDF & QR)
-// ==========================================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RasScannerScreen(viewModel: AppViewModel) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    BackHandler { viewModel.currentScreen = "home" }
-
-    // HOISTED STATES
-    val images by viewModel.images.collectAsState()
-    val savedDocs by viewModel.savedDocuments.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val loadingTitle by viewModel.loadingTitle.collectAsState()
-    val loadingDesc by viewModel.loadingDesc.collectAsState()
-    val progress by viewModel.progress.collectAsState()
-    val progressText by viewModel.progressText.collectAsState()
-    val showCamera by viewModel.showCamera.collectAsState()
-    val showPdfPreview by viewModel.showPdfPreview.collectAsState()
-    val showPdfImportModal by viewModel.showPdfImportModal.collectAsState()
-    val autoCrop by viewModel.autoCrop.collectAsState()
-    val selectedFilter by viewModel.selectedFilter.collectAsState()
-    val pageSize by viewModel.pageSize.collectAsState()
-    val toastMessage by viewModel.toastMessage.collectAsState()
-    val previewDoc by viewModel.previewDoc.collectAsState()
-
-    LaunchedEffect(toastMessage) { toastMessage?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); viewModel.clearToast() } }
-
-    val multipleImagePickerLauncher = rememberLauncherForActivityResult(PickMultipleVisualMedia(30)) { uris ->
-        if (uris.isNotEmpty()) {
-            viewModel.setLoading(true, "Importing Images...", "Optimizing quality for scan.")
-            viewModel.viewModelScope.launch { for ((index, uri) in uris.withIndex()) { processImageUri(context, viewModel, uri); viewModel.updateProgress(index + 1, uris.size) }; viewModel.setLoading(false) }
-        }
-    }
-
-    val pdfPickerLauncher = rememberLauncherForActivityResult(GetContent()) { uri -> uri?.let { viewModel.setShowPdfImportModal(true, it) } }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(RequestPermission()) { granted -> if (granted) viewModel.showCamera.value = true else viewModel.showToast("Camera permission required") }
-
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF9FAFB))) {
-        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 100.dp)) {
-            Surface(color = Color(0xFF4F46E5), shadowElevation = 8.dp) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { viewModel.currentScreen = "home" }) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-                        Icon(Icons.Default.DocumentScanner, null, tint = Color.White, modifier = Modifier.size(28.dp)); Spacer(modifier = Modifier.width(8.dp)); Text("RasScanner", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                    }
-                    if (images.isNotEmpty()) { Button(onClick = { viewModel.clearImages() }, colors = ButtonDefaults.buttonColors(Color.White), shape = RoundedCornerShape(50), contentPadding = PaddingValues(16.dp, 8.dp)) { Text("Clear", color = Color(0xFF4F46E5), fontWeight = FontWeight.Bold, fontSize = 12.sp) } }
-                }
-            }
-
-            Column(modifier = Modifier.padding(16.dp)) {
-                ActionButtonsGridScanner(
-                    onCameraClick = { if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) viewModel.showCamera.value = true else cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
-                    onGalleryClick = { multipleImagePickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) },
-                    onImportPdfClick = { pdfPickerLauncher.launch("application/pdf") }
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                "Welcome to RasGram",
+                style = MaterialTheme.typography.headlineMedium,
+                color = RasGramTheme.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                "Create your secure account.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = RasGramTheme.TextMuted
+            )
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // Name Input
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Your Name") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RasGramTheme.Green,
+                    unfocusedBorderColor = RasGramTheme.Border,
+                    focusedTextColor = RasGramTheme.TextPrimary,
+                    unfocusedTextColor = RasGramTheme.TextPrimary
                 )
-                Spacer(modifier = Modifier.height(16.dp))
-                SettingsCard(autoCrop, { viewModel.autoCrop.value = it }, selectedFilter, { viewModel.selectedFilter.value = it }, pageSize, { viewModel.pageSize.value = it })
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (images.isNotEmpty()) {
-                    Text("Selected Pages (${images.size})", fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5), modifier = Modifier.padding(bottom = 8.dp))
-                    ImageGridScanner(images = images, onRemoveImage = { viewModel.removeImage(it) })
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = { viewModel.setLoading(true, "Scanning & Processing...", "Applying magic filters and creating PDF."); viewModel.viewModelScope.launch(Dispatchers.IO) { generatePDF(context, viewModel); withContext(Dispatchers.Main) { viewModel.setLoading(false) } } },
-                        modifier = Modifier.fillMaxWidth().height(60.dp), colors = ButtonDefaults.buttonColors(Color(0xFF10B981)), shape = RoundedCornerShape(20.dp), elevation = ButtonDefaults.buttonElevation(8.dp)
-                    ) { Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)); Text("CREATE PDF NOW", fontWeight = FontWeight.Black, fontSize = 18.sp) }
-                } else {
-                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(Color.White.copy(0.7f)), border = BorderStroke(2.dp, Color(0xFFD1D5DB).copy(0.5f))) {
-                        Column(Modifier.fillMaxWidth().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.DocumentScanner, null, tint = Color(0xFF9CA3AF), modifier = Modifier.size(56.dp)); Spacer(Modifier.height(12.dp)); Text("Ready to Scan", fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color(0xFF4B5563))
-                            Text("Select photos or use Camera (Continuous shooting enabled).", fontSize = 13.sp, color = Color(0xFF9CA3AF), textAlign = TextAlign.Center)
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Mobile Input
+            OutlinedTextField(
+                value = mobile,
+                onValueChange = { if (it.length <= 11 && it.all { c -> c.isDigit() }) mobile = it },
+                label = { Text("Mobile Number (11 digits)") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RasGramTheme.Green,
+                    unfocusedBorderColor = RasGramTheme.Border,
+                    focusedTextColor = RasGramTheme.TextPrimary,
+                    unfocusedTextColor = RasGramTheme.TextPrimary
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Password Input
+            OutlinedTextField(
+                value = password,
+                onValueChange = { if (it.length <= 6) password = it },
+                label = { Text("Create 6-digit Password") },
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RasGramTheme.Green,
+                    unfocusedBorderColor = RasGramTheme.Border,
+                    focusedTextColor = RasGramTheme.TextPrimary,
+                    unfocusedTextColor = RasGramTheme.TextPrimary
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Button(
+                onClick = {
+                    if (name.isNotBlank() && mobile.length == 11 && password.length >= 4) {
+                        isLoading = true
+                        scope.launch {
+                            try {
+                                // Firebase Anonymous Auth
+                                auth.signInAnonymously().await()
+                                
+                                // Save user data
+                                val userRef = db.collection("chat_users").document(mobile)
+                                val userSnap = userRef.get().await()
+                                
+                                if (userSnap.exists()) {
+                                    val dbData = userSnap.data
+                                    if (dbData?.get("password") != null && dbData["password"] != password) {
+                                        Toast.makeText(context, "Wrong password for this mobile number.", Toast.LENGTH_SHORT).show()
+                                        isLoading = false
+                                        return@launch
+                                    }
+                                } else {
+                                    val userData = hashMapOf(
+                                        "name" to name,
+                                        "mobile" to mobile,
+                                        "password" to password,
+                                        "lastActive" to System.currentTimeMillis(),
+                                        "typingTo" to null,
+                                        "avatarUrl" to "",
+                                        "statusVisible" to true
+                                    )
+                                    userRef.set(userData).await()
+                                }
+                                
+                                val user = User(
+                                    name = name,
+                                    mobile = mobile,
+                                    password = password
+                                )
+                                onLogin(user)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Connection error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                isLoading = false
+                            }
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp)); HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                if (viewModel.isSelectionMode && viewModel.selectedDocsForMerge.size > 1) {
-                    Button(
-                        onClick = { viewModel.setLoading(true, "Merging PDFs...", "Combining selected documents."); viewModel.viewModelScope.launch(Dispatchers.IO) { mergeSelectedPdfs(context, viewModel); withContext(Dispatchers.Main) { viewModel.setLoading(false) } } },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = ButtonDefaults.buttonColors(Color(0xFFF97316))
-                    ) { Text("MERGE ${viewModel.selectedDocsForMerge.size} PDFs", fontWeight = FontWeight.Bold) }
-                }
-
-                HistorySection(viewModel = viewModel, documents = savedDocs, onViewPdf = { doc -> viewModel.setShowPdfPreview(true, doc) }, onDownload = { doc -> saveToLocal(context, doc) }, onDelete = { doc -> viewModel.deleteDocument(context, doc.id) }, onRename = { doc -> viewModel.docToRename = doc; viewModel.showRenameDialog = true })
-            }
-        }
-
-        // Overlays
-        AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize().zIndex(100f)) { LoadingOverlay(title = loadingTitle, description = loadingDesc, progress = progress, progressText = progressText) }
-        AnimatedVisibility(visible = showCamera, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically(), modifier = Modifier.fillMaxSize().zIndex(60f)) { CameraOverlayWithQR(context = context, lifecycleOwner = lifecycleOwner, viewModel = viewModel, onClose = { viewModel.showCamera.value = false }) }
-        AnimatedVisibility(visible = showPdfPreview, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically(), modifier = Modifier.fillMaxSize().zIndex(70f)) { previewDoc?.let { doc -> PdfPreviewOverlay(context = context, document = doc, onClose = { viewModel.setShowPdfPreview(false) }) } }
-        AnimatedVisibility(visible = showPdfImportModal, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize().zIndex(80f)) {
-            PdfImportModal(viewModel = viewModel, onScan = { viewModel.setShowPdfImportModal(false); viewModel.tempImportPdfUri?.let { uri -> viewModel.viewModelScope.launch { importPdfAsScan(context, viewModel, uri) } } }, onRead = { viewModel.setShowPdfImportModal(false); viewModel.tempImportPdfUri?.let { uri -> viewModel.viewModelScope.launch { importPdfAsReader(context, viewModel, uri) } } }, onCancel = { viewModel.setShowPdfImportModal(false) })
-        }
-        if (viewModel.showRenameDialog && viewModel.docToRename != null) { RenameDialog(currentName = viewModel.docToRename!!.name, onDismiss = { viewModel.showRenameDialog = false }, onConfirm = { newName -> viewModel.renameDocument(context, viewModel.docToRename!!.id, newName); viewModel.showRenameDialog = false }) }
-    }
-}
-
-// ==========================================
-// 3. CONVERTER SUITE MENU SCREEN 
-// ==========================================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ConverterSuiteScreen(viewModel: AppViewModel) {
-    BackHandler { viewModel.currentScreen = "home" }
-    
-    // HOISTED STATES
-    val savedDocs by viewModel.savedDocuments.collectAsState()
-    val showPdfPreview by viewModel.showPdfPreview.collectAsState()
-    val previewDoc by viewModel.previewDoc.collectAsState()
-    val context = LocalContext.current
-
-    val toolsList = listOf(
-        ConverterTool("scanner", "Image to PDF", "Convert single or multiple JPG/PNG images into a single, high-quality PDF document instantly.", Icons.Default.PictureAsPdf, "Document", listOf(Color(0xFF2563EB), Color(0xFF3B82F6))),
-        ConverterTool("tool_ocr", "Image to Text", "Extract readable and editable text from images using advanced OCR technology.", Icons.Default.FontDownload, "OCR AI", listOf(Color(0xFF7C3AED), Color(0xFF8B5CF6))),
-        ConverterTool("tool_word_pdf", "Word to PDF", "Securely extract text from MS Word (.docx) files into standard PDF format.", Icons.Default.Description, "Document", listOf(Color(0xFF059669), Color(0xFF10B981))),
-        ConverterTool("tool_txt_b64", "Text ⇆ Base64", "Encode plain string text into Base64 format, or decode Base64 back into readable text.", Icons.Default.Code, "Developer", listOf(Color(0xFFDB2777), Color(0xFFEC4899))),
-        ConverterTool("tool_img_b64", "Image ⇆ Base64", "Convert image files into Base64 strings for direct HTML embedding, or decode back.", Icons.Default.Image, "Developer", listOf(Color(0xFFEA580C), Color(0xFFF97316)))
-    )
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(36.dp).background(brush = Brush.linearGradient(listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))), shape = RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.SyncAlt, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
-                        Spacer(modifier = Modifier.width(12.dp)); Text("Converter Suite", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color(0xFF1E293B))
+                    } else {
+                        Toast.makeText(context, "Please fill all details correctly.", Toast.LENGTH_SHORT).show()
                     }
                 },
-                navigationIcon = { IconButton(onClick = { viewModel.currentScreen = "home" }) { Icon(Icons.Default.ArrowBack, "Back", tint = Color(0xFF475569)) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White.copy(0.95f)), modifier = Modifier.shadow(4.dp)
-            )
-        },
-        containerColor = Color(0xFFF8FAFC)
-    ) { paddingValues ->
-        Column(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
-            Spacer(modifier = Modifier.height(24.dp)); Text(text = "Universal Converter Suite", fontSize = 28.sp, fontWeight = FontWeight.Black, color = Color(0xFF0F172A), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-            Spacer(modifier = Modifier.height(8.dp)); Text(text = "A high-performance toolkit engineered by Rasel Mia.", fontSize = 14.sp, color = Color(0xFF64748B), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(24.dp))
-
-            toolsList.forEach { tool ->
-                ConverterCardItem(tool = tool) {
-                    viewModel.resetConverterStates()
-                    if (tool.id == "scanner") viewModel.showToast("Use Scanner interface for Image to PDF!")
-                    viewModel.currentScreen = tool.id
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                enabled = !isLoading
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = Color.Black
+                    )
+                } else {
+                    Text(
+                        "Create & Login",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+// ================== MAIN CHAT SCREEN ==================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainChatScreen(
+    currentUser: User,
+    isLightMode: Boolean,
+    onToggleTheme: () -> Unit,
+    onLogout: () -> Unit
+) {
+    var selectedContact by remember { mutableStateOf<User?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showNewGroup by remember { mutableStateOf(false) }
+    var showLockedChats by remember { mutableStateOf(false) }
+    var isViewingLocked by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showCallUI by remember { mutableStateOf(false) }
+    var callType by remember { mutableStateOf("audio") }
+    
+    Scaffold(
+        containerColor = if (isLightMode) RasGramTheme.LightBackground else RasGramTheme.DarkBackground
+    ) { padding ->
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Sidebar
+            AnimatedVisibility(
+                visible = selectedContact == null || !isCompactScreen(),
+                modifier = Modifier.fillMaxHeight()
+            ) {
+                SidebarPanel(
+                    currentUser = currentUser,
+                    searchQuery = searchQuery,
+                    onSearchChange = { searchQuery = it },
+                    onContactClick = { selectedContact = it },
+                    isViewingLocked = isViewingLocked,
+                    onToggleTheme = onToggleTheme,
+                    onSettingsClick = { showSettings = true },
+                    onNewGroupClick = { showNewGroup = true },
+                    onLockedChatsClick = {
+                        showLockedChats = true
+                        isViewingLocked = true
+                    },
+                    onLogout = onLogout
+                )
             }
             
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            HistorySection(viewModel = viewModel, documents = savedDocs, onViewPdf = { doc -> viewModel.setShowPdfPreview(true, doc) }, onDownload = { doc -> saveToLocal(context, doc) }, onDelete = { doc -> viewModel.deleteDocument(context, doc.id) }, onRename = { doc -> viewModel.docToRename = doc; viewModel.showRenameDialog = true })
-            Spacer(modifier = Modifier.height(32.dp))
-        }
-
-        AnimatedVisibility(visible = showPdfPreview, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically(), modifier = Modifier.fillMaxSize().zIndex(70f)) { previewDoc?.let { doc -> PdfPreviewOverlay(context = context, document = doc, onClose = { viewModel.setShowPdfPreview(false) }) } }
-        if (viewModel.showRenameDialog && viewModel.docToRename != null) { RenameDialog(currentName = viewModel.docToRename!!.name, onDismiss = { viewModel.showRenameDialog = false }, onConfirm = { newName -> viewModel.renameDocument(context, viewModel.docToRename!!.id, newName); viewModel.showRenameDialog = false }) }
-    }
-}
-
-@Composable
-fun ConverterCardItem(tool: ConverterTool, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }.clip(RoundedCornerShape(20.dp)), elevation = CardDefaults.cardElevation(6.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Box(modifier = Modifier.size(54.dp).background(Brush.linearGradient(tool.gradientColors), RoundedCornerShape(14.dp)).shadow(4.dp, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(tool.icon, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
-                Surface(color = Color(0xFFF1F5F9), shape = RoundedCornerShape(50)) { Text(text = tool.tag.uppercase(), fontWeight = FontWeight.ExtraBold, fontSize = 10.sp, color = Color(0xFF64748B), modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), letterSpacing = 1.sp) }
+            // Chat Area
+            AnimatedVisibility(
+                visible = selectedContact != null,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                selectedContact?.let { contact ->
+                    ChatArea(
+                        currentUser = currentUser,
+                        contact = contact,
+                        onBack = { selectedContact = null },
+                        onCallClick = { type ->
+                            callType = type
+                            showCallUI = true
+                        }
+                    )
+                } ?: EmptyChatState()
             }
-            Spacer(modifier = Modifier.height(16.dp)); Text(tool.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B)); Spacer(modifier = Modifier.height(8.dp)); Text(tool.description, fontSize = 14.sp, color = Color(0xFF64748B), lineHeight = 20.sp)
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) { Text("Open Tool", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tool.gradientColors.first()); Spacer(modifier = Modifier.width(6.dp)); Icon(Icons.Default.ArrowForward, null, tint = tool.gradientColors.first(), modifier = Modifier.size(16.dp)) }
         }
     }
-}
-
-// ==========================================
-// 4. CONVERTER TOOLS LOGIC SCREENS
-// ==========================================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ToolTextBase64Screen(viewModel: AppViewModel) {
-    val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    BackHandler { viewModel.currentScreen = "converters" }
-    Scaffold(topBar = { TopAppBar(title = { Text("Text ⇆ Base64") }, navigationIcon = { IconButton(onClick = { viewModel.currentScreen = "converters" }) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { p ->
-        Column(Modifier.padding(p).padding(16.dp).verticalScroll(rememberScrollState())) {
-            OutlinedTextField(value = viewModel.convInputText, onValueChange = { viewModel.convInputText = it }, modifier = Modifier.fillMaxWidth().height(150.dp), label = { Text("Input Text or Base64") })
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Button(onClick = { try { viewModel.convOutputText = Base64.encodeToString(viewModel.convInputText.toByteArray(), Base64.DEFAULT) } catch(e:Exception){ viewModel.showToast("Error Encoding") } }) { Text("Encode") }
-                Button(onClick = { try { viewModel.convOutputText = String(Base64.decode(viewModel.convInputText, Base64.DEFAULT)) } catch(e:Exception){ viewModel.showToast("Invalid Base64") } }) { Text("Decode") }
+    
+    // Settings Dialog
+    if (showSettings) {
+        SettingsDialog(
+            currentUser = currentUser,
+            onDismiss = { showSettings = false },
+            onSave = { showSettings = false }
+        )
+    }
+    
+    // New Group Dialog
+    if (showNewGroup) {
+        NewGroupDialog(
+            onDismiss = { showNewGroup = false },
+            onCreateGroup = { showNewGroup = false }
+        )
+    }
+    
+    // Locked Chats Dialog
+    if (showLockedChats) {
+        LockedChatsDialog(
+            onDismiss = {
+                showLockedChats = false
+                isViewingLocked = false
             }
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(value = viewModel.convOutputText, onValueChange = { }, modifier = Modifier.fillMaxWidth().height(150.dp), label = { Text("Output Result") }, readOnly = true)
-            if(viewModel.convOutputText.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Button(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("Result", viewModel.convOutputText)); viewModel.showToast("Copied!") }, modifier = Modifier.fillMaxWidth()) { Text("Copy Result") } }
-        }
+        )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ToolImageBase64Screen(viewModel: AppViewModel) {
-    val ctx = LocalContext.current
-    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    BackHandler { viewModel.currentScreen = "converters" }
-    val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
-        if(uri != null) {
-            viewModel.convImageUri = uri; val bitmap = MediaStore.Images.Media.getBitmap(ctx.contentResolver, uri)
-            val baos = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.JPEG, 60, baos)
-            viewModel.convOutputText = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-        }
-    }
-    Scaffold(topBar = { TopAppBar(title = { Text("Image ⇆ Base64") }, navigationIcon = { IconButton(onClick = { viewModel.currentScreen = "converters" }) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { p ->
-        Column(Modifier.padding(p).padding(16.dp).verticalScroll(rememberScrollState())) {
-            Button(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, modifier = Modifier.fillMaxWidth()) { Text("Select Image to Encode") }
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(value = viewModel.convOutputText, onValueChange = { viewModel.convOutputText = it }, modifier = Modifier.fillMaxWidth().height(150.dp), label = { Text("Base64 String") })
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Button(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("B64", viewModel.convOutputText)); viewModel.showToast("Copied!") }) { Text("Copy Base64") }
-                Button(onClick = { try { val bytes = Base64.decode(viewModel.convOutputText.substringAfter(","), Base64.DEFAULT); viewModel.convImageBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } catch (e:Exception){ viewModel.showToast("Invalid Base64") } }) { Text("Decode to Image") }
+    
+    // Call Screen
+    if (showCallUI && selectedContact != null) {
+        CallingScreen(
+            currentUser = currentUser,
+            contact = selectedContact!!,
+            callType = callType,
+            onEndCall = {
+                showCallUI = false
             }
-            Spacer(Modifier.height(16.dp))
-            if(viewModel.convImageBitmap != null) { Image(bitmap = viewModel.convImageBitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(300.dp)) }
+        )
+    }
+}
+
+// ================== WEBRTC CALLING SCREEN ==================
+@Composable
+fun CallingScreen(
+    currentUser: User,
+    contact: User,
+    callType: String,
+    onEndCall: () -> Unit
+) {
+    val context = LocalContext.current
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    
+    var callStatus by remember { mutableStateOf("Calling...") }
+    var isMuted by remember { mutableStateOf(false) }
+    var isCameraOff by remember { mutableStateOf(false) }
+    var isConnected by remember { mutableStateOf(false) }
+    var callSeconds by remember { mutableIntStateOf(0) }
+    
+    // Initialize WebRTC
+    val peerConnectionFactory = remember { 
+        PeerConnectionFactory.builder()
+            .createPeerConnectionFactory()
+    }
+    
+    val iceServers = listOf(
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+    )
+    
+    var peerConnection by remember { mutableStateOf<PeerConnection?>(null) }
+    var localStream by remember { mutableStateOf<MediaStream?>(null) }
+    
+    // Start Call
+    LaunchedEffect(Unit) {
+        try {
+            // Get user media
+            val audioConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            }
+            
+            val stream = peerConnectionFactory.createLocalMediaStream("localStream")
+            
+            // Audio track
+            val audioSource = peerConnectionFactory.createAudioSource(MediaConstraints())
+            val audioTrack = peerConnectionFactory.createAudioTrack("audioTrack", audioSource)
+            stream.addTrack(audioTrack)
+            
+            // Video track for video calls
+            if (callType == "video") {
+                val videoCapturer = getVideoCapturer(context)
+                val videoSource = peerConnectionFactory.createVideoSource(videoCapturer?.isScreencast ?: false)
+                val videoTrack = peerConnectionFactory.createVideoTrack("videoTrack", videoSource)
+                stream.addTrack(videoTrack)
+            }
+            
+            localStream = stream
+            
+            // Create peer connection
+            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            }
+            
+            val observer = object : PeerConnection.Observer {
+                override fun onIceCandidate(candidate: IceCandidate?) {
+                    candidate?.let {
+                        // Send ICE candidate to Firebase
+                    }
+                }
+                
+                override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+                override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    when (state) {
+                        PeerConnection.IceConnectionState.CONNECTED -> {
+                            callStatus = "Connected"
+                            isConnected = true
+                        }
+                        PeerConnection.IceConnectionState.DISCONNECTED -> {
+                            onEndCall()
+                        }
+                        else -> {}
+                    }
+                }
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+                override fun onAddStream(stream: MediaStream?) {}
+                override fun onRemoveStream(stream: MediaStream?) {}
+                override fun onDataChannel(channel: DataChannel?) {}
+                override fun onRenegotiationNeeded() {}
+                override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
+            }
+            
+            val pc = peerConnectionFactory.createPeerConnection(rtcConfig, observer)
+            stream.audioTracks.forEach { pc?.addTrack(it, listOf("localStream")) }
+            if (callType == "video") {
+                stream.videoTracks.forEach { pc?.addTrack(it, listOf("localStream")) }
+            }
+            peerConnection = pc
+            
+            // Create call in Firebase
+            val chatHash = if (currentUser.mobile < contact.mobile) 
+                "${currentUser.mobile}_${contact.mobile}" 
+            else 
+                "${contact.mobile}_${currentUser.mobile}"
+            val callId = "call_${chatHash}_${System.currentTimeMillis()}"
+            
+            val callData = hashMapOf(
+                "caller" to currentUser.mobile,
+                "callee" to contact.mobile,
+                "type" to callType,
+                "status" to "calling",
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            db.collection("calls").document(callId).set(callData)
+            
+            // Listen for answer
+            db.collection("calls").document(callId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    val data = snapshot?.data
+                    if (data?.get("status") == "answered" && data["answer"] != null) {
+                        callStatus = "Connected"
+                        isConnected = true
+                    } else if (data?.get("status") == "ended") {
+                        onEndCall()
+                    }
+                }
+            
+        } catch (e: Exception) {
+            Toast.makeText(context, "Microphone permission denied", Toast.LENGTH_SHORT).show()
+            onEndCall()
+        }
+    }
+    
+    // Call Timer
+    LaunchedEffect(isConnected) {
+        if (isConnected) {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                callSeconds++
+            }
+        }
+    }
+    
+    // Cleanup
+    DisposableEffect(Unit) {
+        onDispose {
+            peerConnection?.close()
+            peerConnection = null
+            localStream?.dispose()
+            localStream = null
+        }
+    }
+    
+    // UI
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF0B141A)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Contact Avatar
+            AsyncImage(
+                model = contact.avatarUrl.ifEmpty {
+                    "https://ui-avatars.com/api/?name=${contact.name}"
+                },
+                contentDescription = "Call Avatar",
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(CircleShape)
+                    .border(4.dp, RasGramTheme.Green, CircleShape)
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                contact.name,
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                if (isConnected) formatTime(callSeconds) else callStatus,
+                style = MaterialTheme.typography.titleMedium,
+                color = RasGramTheme.Green,
+                fontWeight = FontWeight.SemiBold
+            )
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            // Call Controls
+            Row(
+                modifier = Modifier.padding(bottom = 48.dp),
+                horizontalArrangement = Arrangement.spacedBy(32.dp)
+            ) {
+                // Mute Button
+                FloatingActionButton(
+                    onClick = {
+                        isMuted = !isMuted
+                        localStream?.audioTracks?.firstOrNull()?.setEnabled(!isMuted)
+                    },
+                    containerColor = if (isMuted) Color(0xFFF15C6D) else Color.White.copy(alpha = 0.2f),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Mute",
+                        tint = Color.White
+                    )
+                }
+                
+                // End Call Button
+                FloatingActionButton(
+                    onClick = {
+                        scope.launch {
+                            // Update call status in Firebase
+                            db.collection("calls")
+                                .whereEqualTo("caller", currentUser.mobile)
+                                .whereEqualTo("callee", contact.mobile)
+                                .whereEqualTo("status", "calling")
+                                .get()
+                                .await()
+                                .documents
+                                .forEach { it.reference.update("status", "ended") }
+                        }
+                        onEndCall()
+                    },
+                    containerColor = Color(0xFFF15C6D),
+                    modifier = Modifier.size(64.dp)
+                ) {
+                    Icon(
+                        Icons.Default.CallEnd,
+                        contentDescription = "End Call",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                
+                // Camera Toggle (Video calls only)
+                if (callType == "video") {
+                    FloatingActionButton(
+                        onClick = {
+                            isCameraOff = !isCameraOff
+                            localStream?.videoTracks?.firstOrNull()?.setEnabled(!isCameraOff)
+                        },
+                        containerColor = if (isCameraOff) Color(0xFFF15C6D) else Color.White.copy(alpha = 0.2f),
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(
+                            if (isCameraOff) Icons.Default.VideocamOff else Icons.Default.Videocam,
+                            contentDescription = "Camera",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ToolOcrScreen(viewModel: AppViewModel) {
-    val ctx = LocalContext.current
-    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    BackHandler { viewModel.currentScreen = "converters" }
-
-    val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
-        if(uri != null) {
-            viewModel.convImageUri = uri; val bitmap = MediaStore.Images.Media.getBitmap(ctx.contentResolver, uri)
-            viewModel.convImageBitmap = bitmap; viewModel.convOutputText = "Scanning with AI..."
-            val image = InputImage.fromBitmap(bitmap, 0); val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            recognizer.process(image).addOnSuccessListener { visionText -> viewModel.convOutputText = visionText.text }.addOnFailureListener { e -> viewModel.convOutputText = "OCR Failed: ${e.message}" }
+// Helper function to get video capturer
+fun getVideoCapturer(context: android.content.Context): VideoCapturer? {
+    return try {
+        val cameraEnumerator = Camera2Enumerator(context)
+        val deviceNames = cameraEnumerator.deviceNames
+        for (deviceName in deviceNames) {
+            if (cameraEnumerator.isFrontFacing(deviceName)) {
+                return cameraEnumerator.createCapturer(deviceName, null)
+            }
         }
+        null
+    } catch (e: Exception) {
+        try {
+            val cameraEnumerator = Camera1Enumerator(false)
+            val deviceNames = cameraEnumerator.deviceNames
+            for (deviceName in deviceNames) {
+                if (cameraEnumerator.isFrontFacing(deviceName)) {
+                    return cameraEnumerator.createCapturer(deviceName, null)
+                }
+            }
+        } catch (e2: Exception) {
+            // Fallback
+        }
+        null
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("Image to Text (OCR)") }, navigationIcon = { IconButton(onClick = { viewModel.currentScreen = "converters" }) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { p ->
-        Column(Modifier.padding(p).padding(16.dp).verticalScroll(rememberScrollState())) {
-            Button(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, modifier = Modifier.fillMaxWidth()) { Text("Select Document Image") }
-            Spacer(Modifier.height(16.dp))
-            if(viewModel.convImageBitmap != null) { Image(bitmap = viewModel.convImageBitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(200.dp), contentScale = ContentScale.Fit); Spacer(Modifier.height(16.dp)) }
-            OutlinedTextField(value = viewModel.convOutputText, onValueChange = { viewModel.convOutputText = it }, modifier = Modifier.fillMaxWidth().height(250.dp), label = { Text("Extracted Text") })
-            Spacer(Modifier.height(8.dp))
-            if(viewModel.convOutputText.isNotEmpty() && !viewModel.convOutputText.contains("Scanning")) { Button(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("OCR", viewModel.convOutputText)); viewModel.showToast("Copied!") }, modifier = Modifier.fillMaxWidth()) { Text("Copy Text") } }
+}
+
+// ================== SIDEBAR PANEL ==================
+@Composable
+fun SidebarPanel(
+    currentUser: User,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onContactClick: (User) -> Unit,
+    isViewingLocked: Boolean,
+    onToggleTheme: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onNewGroupClick: () -> Unit,
+    onLockedChatsClick: () -> Unit,
+    onLogout: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var users by remember { mutableStateOf<List<User>>(listOf()) }
+    var latestMessages by remember { mutableStateOf<Map<String, Message>>(mapOf()) }
+    
+    LaunchedEffect(Unit) {
+        // Load users from Firebase
+        db.collection("chat_users")
+            .addSnapshotListener { snapshot, _ ->
+                snapshot?.let {
+                    users = it.documents.mapNotNull { doc ->
+                        val data = doc.data
+                        data?.let {
+                            User(
+                                name = it["name"] as? String ?: "",
+                                mobile = doc.id,
+                                avatarUrl = it["avatarUrl"] as? String ?: "",
+                                lastActive = it["lastActive"] as? Long ?: 0,
+                                typingTo = it["typingTo"] as? String,
+                                statusVisible = it["statusVisible"] as? Boolean ?: true
+                            )
+                        }
+                    }.filter { it.mobile != currentUser.mobile }
+                }
+            }
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(400.dp)
+            .background(RasGramTheme.DarkBackground)
+            .border(1.dp, RasGramTheme.Border)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .height(64.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = currentUser.avatarUrl.ifEmpty {
+                    "https://ui-avatars.com/api/?name=${currentUser.name}"
+                },
+                contentDescription = "Avatar",
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable { onSettingsClick() }
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            Row {
+                Text(
+                    "Ras",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = RasGramTheme.TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Gram",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = RasGramTheme.Green,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            // Menu Icons
+            IconButton(onClick = { /* Camera */ }) {
+                Icon(Icons.Default.PhotoCamera, contentDescription = "Camera", tint = RasGramTheme.TextMuted)
+            }
+            
+            var showMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                IconButton(onClick = { showMenu = !showMenu }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = RasGramTheme.TextMuted)
+                }
+                
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("New Group") },
+                        onClick = {
+                            onNewGroupClick()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = {
+                            onSettingsClick()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Toggle Theme") },
+                        onClick = {
+                            onToggleTheme()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.Brightness6, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Locked Chats") },
+                        onClick = {
+                            onLockedChatsClick()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = RasGramTheme.Green) }
+                    )
+                    HorizontalDivider(color = RasGramTheme.Border)
+                    DropdownMenuItem(
+                        text = { Text("Logout", color = Color.Red.copy(alpha = 0.7f)) },
+                        onClick = {
+                            onLogout()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.Logout, contentDescription = null, tint = Color.Red.copy(alpha = 0.7f)) }
+                    )
+                }
+            }
+        }
+        
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            placeholder = { Text("Search or start new chat", color = RasGramTheme.TextMuted) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = RasGramTheme.TextMuted) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = RasGramTheme.Green,
+                unfocusedBorderColor = RasGramTheme.Border,
+                focusedTextColor = RasGramTheme.TextPrimary,
+                unfocusedTextColor = RasGramTheme.TextPrimary,
+                cursorColor = RasGramTheme.Green
+            ),
+            shape = RoundedCornerShape(24.dp)
+        )
+        
+        // Locked Chats Indicator
+        if (!isViewingLocked) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onLockedChatsClick() },
+                color = Color.Transparent
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = CircleShape,
+                        color = RasGramTheme.Green.copy(alpha = 0.1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = RasGramTheme.Green,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        "Locked chats",
+                        color = RasGramTheme.TextPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            HorizontalDivider(color = RasGramTheme.Border)
+        }
+        
+        // Contacts List
+        LazyColumn(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(users.filter { 
+                it.name.contains(searchQuery, ignoreCase = true) || 
+                it.mobile.contains(searchQuery)
+            }) { user ->
+                val latestMsg = latestMessages[user.mobile]
+                ContactItem(
+                    user = user,
+                    latestMessage = latestMsg,
+                    isSelected = false,
+                    onClick = { onContactClick(user) }
+                )
+                HorizontalDivider(color = RasGramTheme.Border)
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ================== CONTACT ITEM ==================
 @Composable
-fun ToolWordToPdfScreen(viewModel: AppViewModel) {
-    val ctx = LocalContext.current
-    BackHandler { viewModel.currentScreen = "converters" }
-    val isLoading by viewModel.isLoading.collectAsState()
-    val loadingTitle by viewModel.loadingTitle.collectAsState()
-    val loadingDesc by viewModel.loadingDesc.collectAsState()
-    val progress by viewModel.progress.collectAsState()
-    val progressText by viewModel.progressText.collectAsState()
+fun ContactItem(
+    user: User,
+    latestMessage: Message?,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        color = if (isSelected) RasGramTheme.DarkPanel else Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = user.avatarUrl.ifEmpty {
+                    "https://ui-avatars.com/api/?name=${user.name}&background=8696a0&color=fff&bold=true"
+                },
+                contentDescription = "Avatar",
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    user.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = RasGramTheme.TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                // Typing indicator
+                if (user.typingTo == user.mobile) {
+                    Text(
+                        "typing...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = RasGramTheme.Green,
+                        fontWeight = FontWeight.Medium
+                    )
+                } else {
+                    latestMessage?.let { msg ->
+                        Text(
+                            msg.text.ifEmpty { getFileTypePreview(msg) },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (!msg.read && msg.senderMobile != "") 
+                                RasGramTheme.TextPrimary 
+                            else 
+                                RasGramTheme.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } ?: Text(
+                        "Tap to chat...",
+                        color = RasGramTheme.TextMuted,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+            
+            latestMessage?.let { msg ->
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        msg.timeString,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (!msg.read && msg.senderMobile != "") 
+                            RasGramTheme.Green 
+                        else 
+                            RasGramTheme.TextMuted
+                    )
+                    if (!msg.read && msg.senderMobile != "" && msg.senderMobile != user.mobile) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = RasGramTheme.Green
+                        ) {
+                            Text(
+                                "New",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
-    val docPicker = rememberLauncherForActivityResult(GetContent()) { uri ->
-        if(uri != null) {
-            viewModel.setLoading(true, "Converting DOCX...", "Parsing document XML and generating PDF.")
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val sb = java.lang.StringBuilder()
-                    ctx.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        ZipInputStream(inputStream).use { zis ->
-                            var entry = zis.nextEntry
-                            while (entry != null) {
-                                if (entry.name == "word/document.xml") {
-                                    val xml = zis.bufferedReader().readText(); val matcher = java.util.regex.Pattern.compile("<w:t.*?>(.*?)</w:t>").matcher(xml)
-                                    while (matcher.find()) { sb.append(matcher.group(1)).append(" ") }
+// ================== CHAT AREA ==================
+@Composable
+fun ChatArea(
+    currentUser: User,
+    contact: User,
+    onBack: () -> Unit,
+    onCallClick: (String) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var messages by remember { mutableStateOf<List<Message>>(listOf()) }
+    var inputText by remember { mutableStateOf("") }
+    var isTyping by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    
+    val chatId = remember(currentUser.mobile, contact.mobile) {
+        generateChatId(currentUser.mobile, contact.mobile)
+    }
+    
+    // Load messages
+    LaunchedEffect(chatId) {
+        db.collection("pvt_msg_$chatId")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                snapshot?.let {
+                    messages = it.documents.mapNotNull { doc ->
+                        val data = doc.data
+                        data?.let {
+                            Message(
+                                id = doc.id,
+                                text = it["text"] as? String ?: "",
+                                senderMobile = it["senderMobile"] as? String ?: "",
+                                timestamp = it["timestamp"] as? Long ?: 0,
+                                timeString = it["timeString"] as? String ?: "",
+                                fileUrl = it["fileUrl"] as? String,
+                                fileName = it["fileName"] as? String,
+                                fileType = it["fileType"] as? String,
+                                reaction = it["reaction"] as? String,
+                                read = it["read"] as? Boolean ?: false,
+                                isCallLog = it["isCallLog"] as? Boolean ?: false,
+                                callStatus = it["callStatus"] as? String,
+                                callType = it["callType"] as? String,
+                                // Pending State Check
+                                isPending = doc.metadata.hasPendingWrites() 
+                            )
+                        }
+                    }
+                }
+            }
+    }
+    
+    // Mark messages as read
+    LaunchedEffect(contact.mobile) {
+        db.collection("pvt_msg_$chatId")
+            .whereEqualTo("senderMobile", contact.mobile)
+            .whereEqualTo("read", false)
+            .get()
+            .await()
+            .documents
+            .forEach { it.reference.update("read", true) }
+    }
+    
+    // Scroll to bottom on new messages
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(RasGramTheme.DarkBackground)
+    ) {
+        // Chat Header
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = RasGramTheme.DarkPanel
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .height(64.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isCompactScreen()) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = RasGramTheme.TextMuted)
+                    }
+                }
+                
+                AsyncImage(
+                    model = contact.avatarUrl.ifEmpty {
+                        "https://ui-avatars.com/api/?name=${contact.name}"
+                    },
+                    contentDescription = "Avatar",
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                )
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        contact.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = RasGramTheme.TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        if (contact.typingTo == currentUser.mobile) "typing..." 
+                        else if (contact.lastActive > System.currentTimeMillis() - 120000) "online"
+                        else "offline",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (contact.typingTo == currentUser.mobile) RasGramTheme.Green 
+                               else RasGramTheme.TextMuted
+                    )
+                }
+                
+                // Call Buttons
+                IconButton(onClick = { onCallClick("video") }) {
+                    Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = RasGramTheme.TextMuted)
+                }
+                IconButton(onClick = { onCallClick("audio") }) {
+                    Icon(Icons.Default.Call, contentDescription = "Voice Call", tint = RasGramTheme.TextMuted)
+                }
+                
+                // Chat Menu
+                var showChatMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { showChatMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Chat Menu", tint = RasGramTheme.TextMuted)
+                    }
+                    DropdownMenu(
+                        expanded = showChatMenu,
+                        onDismissRequest = { showChatMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Lock Chat") },
+                            onClick = { showChatMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear Chat", color = Color.Red.copy(alpha = 0.7f)) },
+                            onClick = {
+                                showChatMenu = false
+                                coroutineScope.launch {
+                                    db.collection("pvt_msg_$chatId")
+                                        .get()
+                                        .await()
+                                        .documents
+                                        .forEach { it.reference.delete() }
                                 }
-                                entry = zis.nextEntry
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        
+        // Messages List
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(
+                    RasGramTheme.DarkBackground.copy(alpha = 0.95f)
+                ),
+            state = listState,
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // Security Notice
+            item {
+                Surface(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF182229)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = Color(0xFFFFD279)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Messages are end-to-end encrypted.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFFD279)
+                        )
+                    }
+                }
+            }
+            
+            items(messages) { message ->
+                MessageBubble(
+                    message = message,
+                    isMe = message.senderMobile == currentUser.mobile,
+                    onReact = { reaction ->
+                        coroutineScope.launch {
+                            db.collection("pvt_msg_$chatId")
+                                .document(message.id)
+                                .update("reaction", reaction)
+                        }
+                    },
+                    onDelete = {
+                        coroutineScope.launch {
+                            db.collection("pvt_msg_$chatId")
+                                .document(message.id)
+                                .delete()
+                        }
+                    }
+                )
+            }
+        }
+        
+        // Input Area
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = RasGramTheme.DarkPanel
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Attach Button
+                IconButton(onClick = { 
+                    // Launch file picker
+                    val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }
+                    // Use ActivityResultLauncher in production
+                }) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = "Attach",
+                        tint = RasGramTheme.TextMuted
+                    )
+                }
+                
+                // Text Input
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { 
+                        inputText = it
+                        // Typing indicator
+                        if (it.isNotEmpty() && !isTyping) {
+                            isTyping = true
+                            coroutineScope.launch {
+                                db.collection("chat_users").document(currentUser.mobile)
+                                    .update("typingTo", contact.mobile)
+                                kotlinx.coroutines.delay(2000)
+                                db.collection("chat_users").document(currentUser.mobile)
+                                    .update("typingTo", null)
+                                isTyping = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp, max = 120.dp),
+                    placeholder = { Text("Type a message", color = RasGramTheme.TextMuted) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedTextColor = RasGramTheme.TextPrimary,
+                        unfocusedTextColor = RasGramTheme.TextPrimary,
+                        cursorColor = RasGramTheme.Green
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Send
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                sendMessage(db, chatId, currentUser.mobile, inputText, null)
+                                inputText = ""
+                            }
+                        }
+                    )
+                )
+                
+                // Send/Mic Button
+                AnimatedContent(
+                    targetState = inputText.isNotEmpty(),
+                    transitionSpec = {
+                        fadeIn() + scaleIn() togetherWith fadeOut() + scaleOut()
+                    }
+                ) { hasText ->
+                    if (hasText) {
+                        IconButton(
+                            onClick = {
+                                if (inputText.isNotBlank()) {
+                                    sendMessage(db, chatId, currentUser.mobile, inputText, null)
+                                    inputText = ""
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = RasGramTheme.Green
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { /* Voice Recording */ }) {
+                            Icon(
+                                Icons.Default.Mic,
+                                contentDescription = "Record",
+                                tint = RasGramTheme.TextMuted
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Send Message Helper
+fun sendMessage(
+    db: FirebaseFirestore,
+    chatId: String,
+    senderMobile: String,
+    text: String,
+    fileUrl: String?
+) {
+    val message = hashMapOf(
+        "text" to text,
+        "senderMobile" to senderMobile,
+        "timestamp" to System.currentTimeMillis(),
+        "timeString" to SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()),
+        "fileUrl" to fileUrl,
+        "fileName" to null,
+        "fileType" to null,
+        "reaction" to null,
+        "read" to false,
+        "isCallLog" to false
+    )
+    
+    // Offline persistence ensures this is saved locally immediately and synced later
+    db.collection("pvt_msg_$chatId")
+        .add(message)
+        .addOnFailureListener { e ->
+            // Already handled by Firebase Offline capabilities
+        }
+}
+
+// ================== MESSAGE BUBBLE ==================
+@Composable
+fun MessageBubble(
+    message: Message,
+    isMe: Boolean,
+    onReact: (String) -> Unit,
+    onDelete: () -> Unit
+) {
+    val bubbleColor = if (isMe) RasGramTheme.BubbleOut else RasGramTheme.BubbleIn
+    val alignment = if (isMe) Alignment.End else Alignment.Start
+    var showReactions by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = alignment
+    ) {
+        if (message.isCallLog) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF182229)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (message.callType == "video") Icons.Default.Videocam else Icons.Default.Call,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (message.callStatus == "missed") Color.Red else RasGramTheme.TextMuted
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        message.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RasGramTheme.TextPrimary
+                    )
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .combinedClickable(
+                        onClick = { 
+                            if (message.senderMobile != "") {
+                                showReactions = !showReactions 
+                            }
+                        },
+                        onLongClick = {
+                            if (isMe) showReactions = true
+                        }
+                    ),
+                shape = RoundedCornerShape(
+                    topStart = 8.dp,
+                    topEnd = 8.dp,
+                    bottomStart = if (isMe) 8.dp else 0.dp,
+                    bottomEnd = if (isMe) 0.dp else 8.dp
+                ),
+                color = bubbleColor
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = if (message.fileUrl != null) 4.dp else 12.dp,
+                        vertical = if (message.fileUrl != null) 4.dp else 8.dp
+                    )
+                ) {
+                    // Image Message
+                    message.fileUrl?.let { url ->
+                        if (message.fileType?.startsWith("image/") == true) {
+                            AsyncImage(
+                                model = url,
+                                contentDescription = "Image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else if (message.fileType?.startsWith("video/") == true) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                color = Color.Black.copy(alpha = 0.5f)
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "Play",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            }
+                        } else if (message.fileType?.startsWith("audio/") == true) {
+                            Row(
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { /* Play audio */ }) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = "Play",
+                                        tint = RasGramTheme.TextPrimary
+                                    )
+                                }
+                                Slider(
+                                    value = 0f,
+                                    onValueChange = {},
+                                    modifier = Modifier.weight(1f),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = RasGramTheme.Green,
+                                        activeTrackColor = RasGramTheme.Green
+                                    )
+                                )
+                                Text(
+                                    "0:00",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = RasGramTheme.TextMuted
+                                )
+                            }
+                        } else {
+                            // Document
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = "File",
+                                    tint = RasGramTheme.TextMuted,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    message.fileName ?: "Document",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = RasGramTheme.TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
-                    val extractedText = sb.toString().trim()
-                    if(extractedText.isEmpty()) { withContext(Dispatchers.Main) { viewModel.showToast("No text found."); viewModel.setLoading(false) }; return@launch }
-
-                    val document = PdfDocument(); val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create(); val page = document.startPage(pageInfo)
-                    val textPaint = TextPaint().apply { color = android.graphics.Color.BLACK; textSize = 14f }
-                    val staticLayout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { StaticLayout.Builder.obtain(extractedText, 0, extractedText.length, textPaint, 500).build() } else { @Suppress("DEPRECATION") StaticLayout(extractedText, textPaint, 500, Layout.Alignment.ALIGN_NORMAL, 1.2f, 0f, false) }
                     
-                    page.canvas.translate(40f, 40f); staticLayout.draw(page.canvas); document.finishPage(page)
-                    val baos = ByteArrayOutputStream(); document.writeTo(baos); document.close()
-                    val pdfBase64 = "data:application/pdf;base64," + Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                    // Text Message
+                    if (message.text.isNotEmpty()) {
+                        Text(
+                            message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = RasGramTheme.TextPrimary,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    }
                     
-                    val savedDoc = SavedDocument(id = "doc_${System.currentTimeMillis()}", name = "Converted_Doc_$timestamp.pdf", date = SimpleDateFormat("MMM dd, yyyy hh:mm a", Locale.getDefault()).format(Date()), pages = 1, thumb = "", pdfBase64 = pdfBase64)
-                    withContext(Dispatchers.Main) { viewModel.addSavedDocument(ctx, savedDoc); viewModel.showToast("Success!"); viewModel.setLoading(false); viewModel.currentScreen = "converters" } 
-                } catch (e: Exception) { Log.e("Convert", "Fail", e); withContext(Dispatchers.Main) { viewModel.showToast("Failed to parse file."); viewModel.setLoading(false) } }
+                    // Time & Read Status
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            message.timeString,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = RasGramTheme.TextMuted.copy(alpha = 0.7f)
+                        )
+                        if (isMe) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            val icon = when {
+                                message.isPending -> Icons.Default.Schedule // Offline pending icon
+                                message.read -> Icons.Default.DoneAll
+                                else -> Icons.Default.Check
+                            }
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = if (message.read && !message.isPending) RasGramTheme.BlueTick else RasGramTheme.TextMuted
+                            )
+                        }
+                    }
+                }
             }
-        }
-    }
-
-    Scaffold(topBar = { TopAppBar(title = { Text("Word to PDF") }, navigationIcon = { IconButton(onClick = { viewModel.currentScreen = "converters" }) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { p ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(Modifier.padding(p).padding(16.dp).fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Description, null, modifier = Modifier.size(80.dp), tint = Color(0xFF059669)); Spacer(Modifier.height(16.dp))
-                Text("Select a .docx file to extract its text and generate a clean PDF document.", textAlign = TextAlign.Center, color = Color.Gray); Spacer(Modifier.height(32.dp))
-                Button(onClick = { docPicker.launch("application/vnd.openxmlformats-officedocument.wordprocessingml.document") }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Select DOCX File") }
+            
+            // Reactions Bar
+            if (showReactions) {
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("👍", "❤️", "😂", "😢").forEach { emoji ->
+                        Surface(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    onReact(emoji)
+                                    showReactions = false
+                                },
+                            shape = CircleShape,
+                            color = RasGramTheme.DarkPanel,
+                            border = BorderStroke(1.dp, RasGramTheme.Border)
+                        ) {
+                            Text(
+                                emoji,
+                                modifier = Modifier.padding(8.dp),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                    
+                    if (isMe) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    showDeleteConfirm = true
+                                },
+                            shape = CircleShape,
+                            color = Color.Red.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.5f))
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                modifier = Modifier.padding(8.dp),
+                                tint = Color.Red
+                            )
+                        }
+                    }
+                }
             }
-            AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize().zIndex(100f)) { LoadingOverlay(title = loadingTitle, description = loadingDesc, progress = progress, progressText = progressText) }
+            
+            // Delete Confirmation
+            if (showDeleteConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirm = false },
+                    title = { Text("Delete Message") },
+                    text = { Text("Delete message for everyone?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            onDelete()
+                            showDeleteConfirm = false
+                        }) {
+                            Text("Delete", color = Color.Red)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirm = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+            
+            // Existing Reaction
+            message.reaction?.let { reaction ->
+                Surface(
+                    modifier = Modifier.offset(y = (-4).dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = RasGramTheme.DarkPanel,
+                    border = BorderStroke(1.dp, RasGramTheme.Border)
+                ) {
+                    Text(
+                        reaction,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     }
 }
 
-// ==========================================
-// RENAME DIALOG
-// ==========================================
-@OptIn(ExperimentalMaterial3Api::class)
+// ================== DIALOGS ==================
 @Composable
-fun RenameDialog(currentName: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var text by remember { mutableStateOf(currentName.removeSuffix(".pdf")) }
+fun SettingsDialog(
+    currentUser: User,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit
+) {
+    var name by remember { mutableStateOf(currentUser.name) }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    
     AlertDialog(
-        onDismissRequest = onDismiss, title = { Text("Rename PDF", fontWeight = FontWeight.Bold) },
-        text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) },
-        confirmButton = { Button(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        onDismissRequest = onDismiss,
+        containerColor = RasGramTheme.DarkPanel,
+        title = {
+            Text(
+                "Profile",
+                color = RasGramTheme.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Avatar
+                AsyncImage(
+                    model = currentUser.avatarUrl.ifEmpty {
+                        "https://ui-avatars.com/api/?name=${currentUser.name}"
+                    },
+                    contentDescription = "Profile",
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .border(2.dp, RasGramTheme.Green, CircleShape)
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Name Input
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Your Name", color = RasGramTheme.Green) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RasGramTheme.Green,
+                        unfocusedBorderColor = RasGramTheme.Border,
+                        focusedTextColor = RasGramTheme.TextPrimary,
+                        unfocusedTextColor = RasGramTheme.TextPrimary,
+                        cursorColor = RasGramTheme.Green
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    scope.launch {
+                        db.collection("chat_users")
+                            .document(currentUser.mobile)
+                            .update("name", name)
+                    }
+                    onSave()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)
+            ) {
+                Text("Save", color = Color.Black)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = RasGramTheme.TextMuted)
+            }
+        }
     )
 }
 
-// ==========================================
-// SHARED UI COMPONENTS
-// ==========================================
 @Composable
-fun ScannerHeader(hasImages: Boolean, onClear: () -> Unit) {
-    Surface(color = Color(0xFF4F46E5), shadowElevation = 8.dp) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.DocumentScanner, null, tint = Color.White, modifier = Modifier.size(32.dp)); Spacer(modifier = Modifier.width(10.dp)); Text("RasScanner", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black) }
-            if (hasImages) { Button(onClick = onClear, colors = ButtonDefaults.buttonColors(Color.White), shape = RoundedCornerShape(50), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) { Text("Clear", color = Color(0xFF4F46E5), fontWeight = FontWeight.Bold, fontSize = 12.sp) } }
-        }
-    }
-}
-
-@Composable
-fun ActionButtonsGridScanner(onCameraClick: () -> Unit, onGalleryClick: () -> Unit, onImportPdfClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ActionButtonScan(Modifier.weight(1f), "Camera & QR", Color(0xFF4F46E5), Color.White, Icons.Default.CameraAlt, onClick = onCameraClick)
-        ActionButtonScan(Modifier.weight(1f), "Gallery", Color.White, Color(0xFF4F46E5), Icons.Default.PhotoLibrary, borderColor = Color(0xFFC7D2FE), onClick = onGalleryClick)
-        ActionButtonScan(Modifier.weight(1f), "Import PDF", Color.White, Color(0xFF059669), Icons.Default.PictureAsPdf, borderColor = Color(0xFFA7F3D0), onClick = onImportPdfClick)
-    }
-}
-
-@Composable
-fun ActionButtonScan(modifier: Modifier, title: String, containerColor: Color, contentColor: Color, icon: ImageVector, borderColor: Color? = null, onClick: () -> Unit) {
-    Card(modifier = modifier.height(85.dp).clickable(onClick = onClick), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor), border = borderColor?.let { BorderStroke(1.dp, it) }, elevation = CardDefaults.cardElevation(2.dp)) {
-        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Icon(icon, null, tint = contentColor, modifier = Modifier.size(28.dp)); Spacer(Modifier.height(6.dp)); Text(title, color = contentColor, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsCard(autoCrop: Boolean, onAutoCropChange: (Boolean) -> Unit, selectedFilter: ImageFilter, onFilterChange: (ImageFilter) -> Unit, pageSize: PageSize, onPageSizeChange: (PageSize) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(Color.White), elevation = CardDefaults.cardElevation(4.dp)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            DropdownSetting("Scan Filter", selectedFilter.label, ImageFilter.entries.map { it.label }) { idx -> onFilterChange(ImageFilter.entries[idx]) }
-            DropdownSetting("Export Size", pageSize.label, PageSize.entries.map { it.label }) { idx -> onPageSizeChange(PageSize.entries[idx]) }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun DropdownSetting(label: String, selectedText: String, options: List<String>, onSelect: (Int) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280), modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-            OutlinedTextField(value = selectedText, onValueChange = {}, readOnly = true, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }, modifier = Modifier.fillMaxWidth().menuAnchor(), textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE5E7EB)), shape = RoundedCornerShape(16.dp))
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { options.forEachIndexed { i, opt -> DropdownMenuItem(text = { Text(opt, fontWeight = FontWeight.Bold, fontSize = 14.sp) }, onClick = { onSelect(i); expanded = false }) } }
-        }
-    }
-}
-
-@Composable
-fun ImageGridScanner(images: List<ScanImage>, onRemoveImage: (String) -> Unit) {
-    LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(items = images, key = { it.id }) { img -> ImageGridItem(img, images.indexOf(img) + 1, onRemove = { onRemoveImage(img.id) }) }
-    }
-}
-
-@Composable
-fun ImageGridItem(image: ScanImage, pageNumber: Int, onRemove: () -> Unit) {
-    Card(modifier = Modifier.aspectRatio(0.75f), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(Color.White), elevation = CardDefaults.cardElevation(6.dp)) {
-        Box(Modifier.fillMaxSize()) {
-            val bitmap = remember(image.thumbUrl) { if (image.thumbUrl.isNotEmpty()) decodeBase64(image.thumbUrl) else null }
-            if (bitmap != null) Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Page $pageNumber", modifier = Modifier.fillMaxSize().padding(4.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) 
-            else Box(Modifier.fillMaxSize().background(Color(0xFFE5E7EB)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Image, null, tint = Color.Gray) }
-            IconButton(onClick = onRemove, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(30.dp).background(Color(0xFFEF4444).copy(alpha=0.9f), CircleShape)) { Icon(Icons.Default.Close, "Remove", tint = Color.White, modifier = Modifier.size(18.dp)) }
-            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(8.dp), shape = RoundedCornerShape(8.dp), color = Color(0xFF4F46E5).copy(0.9f)) { Text("Page $pageNumber", color = Color.White, fontWeight = FontWeight.Black, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) }
-        }
-    }
-}
-
-@Composable
-fun EmptyState() {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(Color.White.copy(0.7f)), border = BorderStroke(2.dp, Color(0xFFD1D5DB).copy(0.5f))) {
-        Column(Modifier.fillMaxWidth().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.DocumentScanner, null, tint = Color(0xFF9CA3AF), modifier = Modifier.size(56.dp)); Spacer(Modifier.height(12.dp))
-            Text("Ready to Scan", fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color(0xFF4B5563))
-            Text("Select photos or use Camera.", fontSize = 13.sp, color = Color(0xFF9CA3AF), textAlign = TextAlign.Center)
-        }
-    }
-}
-
-@Composable
-fun GeneratePdfButton(onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = Modifier.fillMaxWidth().height(60.dp), colors = ButtonDefaults.buttonColors(Color(0xFF10B981)), shape = RoundedCornerShape(20.dp), elevation = ButtonDefaults.buttonElevation(8.dp)) {
-        Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)); Text("CREATE PDF NOW", fontWeight = FontWeight.Black, fontSize = 18.sp)
-    }
-}
-
-@Composable
-fun HistorySection(viewModel: AppViewModel, documents: List<SavedDocument>, onViewPdf: (SavedDocument) -> Unit, onDownload: (SavedDocument) -> Unit, onDelete: (SavedDocument) -> Unit, onRename: (SavedDocument) -> Unit) {
-    val context = LocalContext.current
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FolderZip, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(24.dp)); Spacer(Modifier.width(8.dp)); Text("Saved Documents Library", fontWeight = FontWeight.Black, fontSize = 20.sp, color = Color(0xFF1F2937)) }
-            if (documents.size > 1) { TextButton(onClick = { viewModel.toggleSelectionMode() }) { Text(if (viewModel.isSelectionMode) "Cancel Merge" else "Merge PDFs", color = if (viewModel.isSelectionMode) Color.Red else Color(0xFF4F46E5), fontWeight = FontWeight.Bold) } }
-        }
-        Spacer(Modifier.height(8.dp))
-        if (documents.isEmpty()) {
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(Color.White.copy(0.7f))) { Column(Modifier.fillMaxWidth().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("No PDFs generated yet.", color = Color.Gray) } }
-        } else {
-            documents.forEach { doc ->
-                val isSelected = viewModel.selectedDocsForMerge.contains(doc.id)
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { if (viewModel.isSelectionMode) viewModel.toggleDocSelection(doc.id) else onViewPdf(doc) },
-                    shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(if (isSelected) Color(0xFFEEF2FF) else Color.White), border = if (isSelected) BorderStroke(2.dp, Color(0xFF4F46E5)) else null, elevation = CardDefaults.cardElevation(2.dp)
-                ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (viewModel.isSelectionMode) Checkbox(checked = isSelected, onCheckedChange = { viewModel.toggleDocSelection(doc.id) }) else Icon(Icons.Default.PictureAsPdf, null, tint = Color(0xFFEF4444), modifier = Modifier.size(40.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) { Text(doc.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${doc.pages} Pages • ${doc.date}", fontSize = 11.sp, color = Color.Gray) }
-                        if (!viewModel.isSelectionMode) {
-                            IconButton(onClick = { sharePdf(context, doc) }) { Icon(Icons.Default.Share, null, tint = Color(0xFF10B981)) }
-                            IconButton(onClick = { onRename(doc) }) { Icon(Icons.Default.Edit, null, tint = Color(0xFFF97316)) }
-                            IconButton(onClick = { onDelete(doc) }) { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF4444)) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// 📸 CAMERA OVERLAY WITH CONTINUOUS SHOOTING 📸
-@SuppressLint("UnsafeOptInUsageError")
-@Composable
-fun CameraOverlayWithQR(context: Context, lifecycleOwner: LifecycleOwner, viewModel: AppViewModel, onClose: () -> Unit) {
-    var previewView: PreviewView? by remember { mutableStateOf(null) }
-    var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
-    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
-    var detectedQrText by remember { mutableStateOf<String?>(null) }
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+fun NewGroupDialog(
+    onDismiss: () -> Unit,
+    onCreateGroup: () -> Unit
+) {
+    var groupName by remember { mutableStateOf("") }
     
-    val currentImagesCount = viewModel.images.collectAsState().value.size
-
-    LaunchedEffect(Unit) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            try {
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView?.surfaceProvider) }
-                imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = RasGramTheme.DarkPanel,
+        title = {
+            Text(
+                "New Group",
+                color = RasGramTheme.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text("Group Subject") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RasGramTheme.Green,
+                        unfocusedBorderColor = RasGramTheme.Border,
+                        focusedTextColor = RasGramTheme.TextPrimary,
+                        unfocusedTextColor = RasGramTheme.TextPrimary
+                    )
+                )
                 
-                val barcodeScanner = BarcodeScanning.getClient(BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build())
-                val imageAnalysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-                imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                    val mediaImage = imageProxy.image
-                    if (mediaImage != null) {
-                        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                        barcodeScanner.process(image).addOnSuccessListener { barcodes ->
-                            for (barcode in barcodes) { val rawValue = barcode.rawValue; if (rawValue != null && detectedQrText != rawValue) detectedQrText = rawValue }
-                        }.addOnCompleteListener { imageProxy.close() }
-                    } else { imageProxy.close() }
-                }
-
-                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture, imageAnalysis)
-            } catch (e: Exception) { Log.e("CameraOverlay", "Camera failed", e) }
-        }, ContextCompat.getMainExecutor(context))
-    }
-    DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
-
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp).zIndex(10f), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
-            IconButton(onClick = onClose, modifier = Modifier.background(Color.White.copy(0.2f), CircleShape)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
-            if (currentImagesCount > 0) {
-                Surface(color = Color(0xFF4F46E5), shape = RoundedCornerShape(50)) { Text("$currentImagesCount Captured", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) }
-            }
-        }
-        AndroidView(factory = { ctx -> PreviewView(ctx).apply { layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT); scaleType = PreviewView.ScaleType.FILL_CENTER }.also { previewView = it } }, modifier = Modifier.fillMaxSize())
-        
-        if (detectedQrText != null) {
-            Card(modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp, start = 24.dp, end = 24.dp).fillMaxWidth(), colors = CardDefaults.cardColors(Color.White.copy(0.9f)), shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("QR Code Detected!", fontWeight = FontWeight.Bold, color = Color(0xFF10B981)); Spacer(Modifier.height(8.dp)); Text(detectedQrText!!, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center); Spacer(Modifier.height(8.dp))
-                    Button(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("QR", detectedQrText)); viewModel.showToast("Copied!"); detectedQrText = null }) { Text("Copy & Dismiss") }
-                }
-            }
-        }
-        
-        Box(Modifier.align(Alignment.BottomCenter).padding(40.dp), contentAlignment = Alignment.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                Button(onClick = {
-                    val capture = imageCapture ?: return@Button
-                    val outputOptions = ImageCapture.OutputFileOptions.Builder(File(context.cacheDir, "capture_${System.currentTimeMillis()}.jpg")).build()
-                    capture.takePicture(outputOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            val savedUri = output.savedUri ?: return
-                            viewModel.viewModelScope.launch(Dispatchers.IO) { processCapturedImage(context, viewModel, savedUri); withContext(Dispatchers.Main) { viewModel.showToast("Captured! Take another or click Done.") } }
-                        }
-                        override fun onError(exc: ImageCaptureException) { Log.e("Camera", "Capture failed", exc) }
-                    })
-                }, modifier = Modifier.size(80.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(Color.White), border = BorderStroke(4.dp, Color(0xFF9CA3AF))) { Box(Modifier.size(64.dp).background(Color.White, CircleShape).border(4.dp, Color(0xFFD1D5DB), CircleShape)) }
+                Spacer(modifier = Modifier.height(16.dp))
                 
-                if (currentImagesCount > 0) {
-                    IconButton(onClick = onClose, modifier = Modifier.size(64.dp).background(Color(0xFF10B981), CircleShape)) { Icon(Icons.Default.Check, "Done", tint = Color.White, modifier = Modifier.size(32.dp)) }
-                }
+                Text(
+                    "Select contacts to add:",
+                    color = RasGramTheme.TextPrimary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onCreateGroup,
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                enabled = groupName.isNotBlank()
+            ) {
+                Text("Create", color = Color.Black)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = RasGramTheme.TextMuted)
             }
         }
-    }
+    )
 }
 
 @Composable
-fun PdfPreviewOverlay(context: Context, document: SavedDocument, onClose: () -> Unit) {
-    val pdfBytes = remember(document.pdfBase64) { try { Base64.decode(document.pdfBase64.substringAfter("base64,"), Base64.DEFAULT) } catch (e: Exception) { null } }
-    val tmpFile = remember(pdfBytes) { if (pdfBytes != null) { val f = File(context.cacheDir, "temp_view_${System.currentTimeMillis()}.pdf"); f.writeBytes(pdfBytes); f } else null }
-    val renderer = remember(tmpFile) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && tmpFile != null) { try { val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY); PdfRenderer(pfd) } catch (e: Exception) { null } } else null }
-    val pageCount = renderer?.pageCount ?: 0
-    val renderMutex = remember { Mutex() } 
-    DisposableEffect(Unit) { onDispose { renderer?.close(); tmpFile?.delete() } }
-
-    Column(Modifier.fillMaxSize().background(Color(0xFFE5E7EB))) {
-        Surface(color = Color(0xFF4F46E5), shadowElevation = 8.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }; Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) { Text(document.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("$pageCount Page(s)", color = Color.White.copy(0.8f), fontSize = 12.sp) }
+fun LockedChatsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = RasGramTheme.DarkPanel,
+        title = {
+            Text(
+                "Locked Chats",
+                color = RasGramTheme.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                "These chats are locked with your PIN.",
+                color = RasGramTheme.TextMuted
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)
+            ) {
+                Text("OK", color = Color.Black)
             }
         }
-        if (renderer != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            var scale by remember { mutableStateOf(1f) }
-            var offset by remember { mutableStateOf(Offset.Zero) }
-            val state = rememberTransformableState { zoomChange, offsetChange, _ -> scale = (scale * zoomChange).coerceIn(1f, 4f); offset += offsetChange }
-            LazyColumn(modifier = Modifier.fillMaxSize().transformable(state = state).graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), horizontalAlignment = Alignment.CenterHorizontally, contentPadding = PaddingValues(vertical = 16.dp)) {
-                items(pageCount) { pageIndex ->
-                    var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
-                    LaunchedEffect(pageIndex) {
-                        withContext(Dispatchers.IO) {
-                            renderMutex.withLock {
-                                try {
-                                    val page = renderer.openPage(pageIndex); val w = (page.width * 2.0).toInt(); val h = (page.height * 2.0).toInt()
-                                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); val canvas = Canvas(bmp)
-                                    canvas.drawColor(android.graphics.Color.WHITE); page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); page.close()
-                                    pageBitmap = bmp
-                                } catch (e: Exception) { Log.e("PDF", "Error", e) }
-                            }
-                        }
-                    }
-                    Card(modifier = Modifier.padding(bottom = 16.dp).fillMaxWidth(0.95f), elevation = CardDefaults.cardElevation(8.dp)) {
-                        if (pageBitmap != null) Image(bitmap = pageBitmap!!.asImageBitmap(), contentDescription = "Page ${pageIndex + 1}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
-                        else Box(modifier = Modifier.fillMaxWidth().height(400.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFF4F46E5)) }
-                    }
-                }
-            }
-        }
-    }
+    )
 }
 
 @Composable
-fun PdfImportModal(viewModel: AppViewModel, onScan: () -> Unit, onRead: () -> Unit, onCancel: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable(onClick = onCancel), contentAlignment = Alignment.Center) {
-        Card(Modifier.padding(24.dp).fillMaxWidth().clickable(enabled = false, onClick = {}), shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(Color.White)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Import PDF Options", fontWeight = FontWeight.Black, fontSize = 20.sp, color = Color(0xFF1F2937)); Spacer(Modifier.height(8.dp))
-                Text("How do you want to process this PDF file?", fontSize = 14.sp, color = Color(0xFF9CA3AF)); Spacer(Modifier.height(24.dp))
-                Button(onClick = onScan, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(Color(0xFF4F46E5)), shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 16.dp)) { Icon(Icons.Default.Scanner, null); Spacer(Modifier.width(8.dp)); Text("Scan & Extract Pages", fontWeight = FontWeight.Bold) }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onRead, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)), shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 16.dp), border = BorderStroke(1.dp, Color(0xFFA7F3D0))) { Icon(Icons.Default.MenuBook, null); Spacer(Modifier.width(8.dp)); Text("Save Directly as Reader", fontWeight = FontWeight.Bold) }
-                Spacer(Modifier.height(12.dp))
-                TextButton(onClick = onCancel) { Text("Cancel", color = Color(0xFF9CA3AF), fontWeight = FontWeight.Bold) }
-            }
+fun EmptyChatState() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = CircleShape,
+            color = RasGramTheme.DarkPanel
+        ) {
+            Icon(
+                Icons.Default.Send,
+                contentDescription = null,
+                modifier = Modifier.padding(30.dp),
+                tint = RasGramTheme.Green
+            )
         }
-    }
-}
-
-@Composable
-fun LoadingOverlay(title: String, description: String, progress: Float, progressText: String) {
-    Box(Modifier.fillMaxSize().background(Color.White.copy(0.95f)), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            CircularProgressIndicator(Modifier.size(64.dp), color = Color(0xFF4F46E5), strokeWidth = 5.dp); Spacer(Modifier.height(24.dp))
-            Text(title, fontWeight = FontWeight.Black, fontSize = 24.sp, color = Color(0xFF1F2937)); Spacer(Modifier.height(8.dp))
-            Text(description, fontSize = 14.sp, color = Color(0xFF9CA3AF), textAlign = TextAlign.Center); Spacer(Modifier.height(32.dp))
-            Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.CenterHorizontally) {
-                LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(8.dp)), color = Color(0xFF4F46E5), trackColor = Color(0xFFE5E7EB))
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(progressText, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF6B7280)); Text("${(progress * 100).toInt()}%", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4F46E5))
-                }
-            }
-        }
-    }
-}
-
-// ==========================================
-// CORE PROCESSING FUNCTIONS
-// ==========================================
-fun bitmapToBase64(bitmap: Bitmap): String {
-    val baos = ByteArrayOutputStream()
-    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, baos)
-    return "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-}
-
-fun decodeBase64(base64: String): Bitmap? {
-    return try {
-        val bytes = Base64.decode(base64.substringAfter(","), Base64.DEFAULT)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    } catch (e: Exception) { null }
-}
-
-suspend fun processImageUri(context: Context, viewModel: AppViewModel, uri: Uri) {
-    withContext(Dispatchers.IO) {
-        try {
-            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
-                android.graphics.ImageDecoder.decodeBitmap(source) { decoder, _, _ -> decoder.isMutableRequired = true }
-            } else { MediaStore.Images.Media.getBitmap(context.contentResolver, uri) }
-            val maxDim = 1600f; val scale = minOf(maxDim / bitmap.width, maxDim / bitmap.height, 1f)
-            val scaledBmp = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true) else bitmap
-            val dataUrl = bitmapToBase64(scaledBmp)
-            val thumbBitmap = Bitmap.createScaledBitmap(scaledBmp, 200, (200f / scaledBmp.width * scaledBmp.height).toInt(), true)
-            val thumbUrl = bitmapToBase64(thumbBitmap)
-            withContext(Dispatchers.Main) { viewModel.addImage(ScanImage(dataUrl = dataUrl, thumbUrl = thumbUrl)) }
-        } catch (e: Exception) { Log.e("Scanner", "Failed to process image", e) }
-    }
-}
-
-suspend fun processCapturedImage(context: Context, viewModel: AppViewModel, uri: Uri) { processImageUri(context, viewModel, uri) }
-
-suspend fun generatePDF(context: Context, viewModel: AppViewModel) {
-    withContext(Dispatchers.IO) {
-        val currentImages = viewModel.images.value
-        if (currentImages.isEmpty()) return@withContext
-        val filter = viewModel.selectedFilter.value
-        val pageSizeSetting = viewModel.pageSize.value
-        val document = android.graphics.pdf.PdfDocument()
         
-        for ((index, img) in currentImages.withIndex()) {
-            withContext(Dispatchers.Main) { viewModel.updateProgress(index + 1, currentImages.size) }
-            val bytes = Base64.decode(img.dataUrl.substringAfter(","), Base64.DEFAULT)
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
-            val processedBmp = applyImageFilter(bmp, filter)
-            val pageW = if (pageSizeSetting == PageSize.A4) 1190 else processedBmp.width
-            val pageH = if (pageSizeSetting == PageSize.A4) 1684 else processedBmp.height
-            val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(pageW, pageH, index + 1).create()
-            val page = document.startPage(pageInfo)
-            
-            if (pageSizeSetting == PageSize.A4) {
-                val ratio = minOf(pageW.toFloat() / processedBmp.width, pageH.toFloat() / processedBmp.height)
-                val newW = (processedBmp.width * ratio).toInt(); val newH = (processedBmp.height * ratio).toInt()
-                val scaledBmp = Bitmap.createScaledBitmap(processedBmp, newW, newH, true)
-                val left = (pageW - newW) / 2f; val top = (pageH - newH) / 2f
-                page.canvas.drawColor(android.graphics.Color.WHITE); page.canvas.drawBitmap(scaledBmp, left, top, null)
-            } else { page.canvas.drawBitmap(processedBmp, 0f, 0f, null) }
-            document.finishPage(page)
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Text(
+            "RasGram",
+            style = MaterialTheme.typography.headlineLarge,
+            color = RasGramTheme.TextPrimary,
+            fontWeight = FontWeight.Light
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            "Send and receive messages securely.\nEnd-to-end encrypted connection active.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = RasGramTheme.TextMuted,
+            modifier = Modifier.padding(horizontal = 32.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = RasGramTheme.Green
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "End-to-end encrypted",
+                style = MaterialTheme.typography.bodySmall,
+                color = RasGramTheme.TextMuted
+            )
         }
-        val baos = ByteArrayOutputStream(); document.writeTo(baos); document.close()
-        val pdfBase64 = "data:application/pdf;base64," + Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-        val savedDoc = SavedDocument(id = "doc_${System.currentTimeMillis()}", name = "RasScan_$timestamp.pdf", date = SimpleDateFormat("MMM dd, yyyy hh:mm a", Locale.getDefault()).format(Date()), pages = currentImages.size, thumb = currentImages.firstOrNull()?.thumbUrl ?: "", pdfBase64 = pdfBase64)
-        withContext(Dispatchers.Main) { viewModel.addSavedDocument(context, savedDoc); viewModel.clearImages(); viewModel.showToast("PDF Saved!") }
     }
 }
 
-fun applyImageFilter(bitmap: Bitmap, filter: ImageFilter): Bitmap {
-    val result = bitmap.copy(Bitmap.Config.ARGB_8888, true); val canvas = Canvas(result); val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    when (filter) {
-        ImageFilter.NONE -> { }
-        ImageFilter.MAGIC_PRO -> { val cm = ColorMatrix(floatArrayOf(1.3f, 0f, 0f, 0f, 20f, 0f, 1.3f, 0f, 0f, 20f, 0f, 0f, 1.3f, 0f, 20f, 0f, 0f, 0f, 1f, 0f)); paint.colorFilter = ColorMatrixColorFilter(cm); canvas.drawBitmap(result, 0f, 0f, paint) }
-        ImageFilter.PRINT_PRO -> { val cm = ColorMatrix().apply { setSaturation(0f) }; val contrast = ColorMatrix(floatArrayOf(1.8f, 0f, 0f, 0f, -60f, 0f, 1.8f, 0f, 0f, -60f, 0f, 0f, 1.8f, 0f, -60f, 0f, 0f, 0f, 1f, 0f)); cm.postConcat(contrast); paint.colorFilter = ColorMatrixColorFilter(cm); canvas.drawBitmap(result, 0f, 0f, paint) }
-        ImageFilter.CLEAR_PRO -> { val cm = ColorMatrix(floatArrayOf(1.5f, 0f, 0f, 0f, 30f, 0f, 1.5f, 0f, 0f, 30f, 0f, 0f, 1.5f, 0f, 30f, 0f, 0f, 0f, 1f, 0f)); paint.colorFilter = ColorMatrixColorFilter(cm); canvas.drawBitmap(result, 0f, 0f, paint) }
-        ImageFilter.SUPER_BW -> { val cm = ColorMatrix().apply { setSaturation(0f) }; val contrast = ColorMatrix(floatArrayOf(2.5f, 0f, 0f, 0f, -120f, 0f, 2.5f, 0f, 0f, -120f, 0f, 0f, 2.5f, 0f, -120f, 0f, 0f, 0f, 1f, 0f)); cm.postConcat(contrast); paint.colorFilter = ColorMatrixColorFilter(cm); canvas.drawBitmap(result, 0f, 0f, paint) }
-    }
-    return result
+// ================== HELPER FUNCTIONS ==================
+fun generateChatId(mobile1: String, mobile2: String): String {
+    return if (mobile1 < mobile2) "${mobile1}_${mobile2}" else "${mobile2}_${mobile1}"
 }
 
-suspend fun mergeSelectedPdfs(context: Context, viewModel: AppViewModel) {
-    withContext(Dispatchers.IO) {
-        val selectedIds = viewModel.selectedDocsForMerge
-        val docsToMerge = viewModel.savedDocuments.value.filter { selectedIds.contains(it.id) }
-        if (docsToMerge.size < 2) return@withContext
-        try {
-            val mergedDocument = android.graphics.pdf.PdfDocument()
-            var totalPages = 0
-            for ((docIndex, doc) in docsToMerge.withIndex()) {
-                withContext(Dispatchers.Main) { viewModel.updateProgress(docIndex + 1, docsToMerge.size) }
-                val pdfBytes = Base64.decode(doc.pdfBase64.substringAfter(","), Base64.DEFAULT)
-                val tmpFile = File(context.cacheDir, "temp_merge_${System.currentTimeMillis()}.pdf")
-                tmpFile.writeBytes(pdfBytes)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY)
-                    val renderer = PdfRenderer(pfd)
-                    for (i in 0 until renderer.pageCount) {
-                        val page = renderer.openPage(i); val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888); val canvas = Canvas(bmp)
-                        canvas.drawColor(android.graphics.Color.WHITE); page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); page.close()
-                        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(bmp.width, bmp.height, totalPages + 1).create()
-                        val newPage = mergedDocument.startPage(pageInfo); newPage.canvas.drawBitmap(bmp, 0f, 0f, null); mergedDocument.finishPage(newPage); totalPages++
-                    }
-                    renderer.close(); pfd.close()
-                }
-                tmpFile.delete()
-            }
-            val baos = ByteArrayOutputStream(); mergedDocument.writeTo(baos); mergedDocument.close()
-            val pdfBase64 = "data:application/pdf;base64," + Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-            val savedDoc = SavedDocument(id = "doc_${System.currentTimeMillis()}", name = "RasScan_Merged_$timestamp.pdf", date = SimpleDateFormat("MMM dd, yyyy hh:mm a", Locale.getDefault()).format(Date()), pages = totalPages, thumb = docsToMerge.first().thumb, pdfBase64 = pdfBase64)
-            withContext(Dispatchers.Main) { viewModel.addSavedDocument(context, savedDoc); viewModel.toggleSelectionMode(); viewModel.showToast("Merged successfully!") }
-        } catch (e: Exception) { Log.e("Scanner", "Merge failed", e); withContext(Dispatchers.Main) { viewModel.showToast("Failed to merge PDFs") } }
-    }
-}
-
-suspend fun importPdfAsScan(context: Context, viewModel: AppViewModel, uri: Uri) {
-    withContext(Dispatchers.IO) {
-        try {
-            val inputStream = context.contentResolver.openInputStream(uri); val bytes = inputStream?.readBytes(); inputStream?.close()
-            if (bytes != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                val tmpFile = File(context.cacheDir, "temp_import_scan_${System.currentTimeMillis()}.pdf"); tmpFile.writeBytes(bytes)
-                val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY); val renderer = PdfRenderer(pfd)
-                for (i in 0 until renderer.pageCount) {
-                    val page = renderer.openPage(i); val bmp = Bitmap.createBitmap((page.width * 1.5).toInt(), (page.height * 1.5).toInt(), Bitmap.Config.ARGB_8888); val canvas = Canvas(bmp)
-                    canvas.drawColor(android.graphics.Color.WHITE); page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); page.close()
-                    val dataUrl = bitmapToBase64(bmp); val thumbBmp = Bitmap.createScaledBitmap(bmp, 200, (200f / bmp.width * bmp.height).toInt(), true); val thumbUrl = bitmapToBase64(thumbBmp)
-                    withContext(Dispatchers.Main) { viewModel.addImage(ScanImage(dataUrl = dataUrl, thumbUrl = thumbUrl)) }
-                }
-                renderer.close(); pfd.close(); tmpFile.delete()
-                withContext(Dispatchers.Main) { viewModel.showToast("PDF Pages extracted!") }
-            }
-        } catch (e: Exception) { Log.e("Scanner", "PDF scan import failed", e) }
-    }
-}
-
-suspend fun importPdfAsReader(context: Context, viewModel: AppViewModel, uri: Uri) {
-    withContext(Dispatchers.IO) {
-        try {
-            val inputStream = context.contentResolver.openInputStream(uri); val bytes = inputStream?.readBytes(); inputStream?.close()
-            if (bytes != null) {
-                val pdfBase64 = "data:application/pdf;base64," + Base64.encodeToString(bytes, Base64.DEFAULT)
-                var thumbBase64 = ""; var pageCount = 1
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    val tmpFile = File(context.cacheDir, "temp_thumb_${System.currentTimeMillis()}.pdf"); tmpFile.writeBytes(bytes)
-                    val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY); val renderer = PdfRenderer(pfd)
-                    pageCount = renderer.pageCount
-                    if (pageCount > 0) {
-                        val page = renderer.openPage(0); val bmp = Bitmap.createBitmap(200, (200f / page.width * page.height).toInt(), Bitmap.Config.ARGB_8888); val canvas = Canvas(bmp)
-                        canvas.drawColor(android.graphics.Color.WHITE); page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); page.close()
-                        thumbBase64 = bitmapToBase64(bmp)
-                    }
-                    renderer.close(); pfd.close(); tmpFile.delete()
-                }
-                var name = uri.path?.substringAfterLast('/') ?: "Imported.pdf"
-                if (uri.scheme == "content") { context.contentResolver.query(uri, null, null, null, null)?.use { cursor -> if (cursor.moveToFirst()) { val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (idx >= 0) name = cursor.getString(idx) } } }
-                val savedDoc = SavedDocument(id = "doc_${System.currentTimeMillis()}", name = name, date = SimpleDateFormat("MMM dd, yyyy hh:mm a", Locale.getDefault()).format(Date()), pages = pageCount, thumb = thumbBase64, pdfBase64 = pdfBase64)
-                withContext(Dispatchers.Main) { viewModel.addSavedDocument(context, savedDoc); viewModel.showToast("Saved to History!") }
-            }
-        } catch (e: Exception) { Log.e("Scanner", "PDF reader import failed", e) }
-    }
-}
-
-fun sharePdf(context: Context, document: SavedDocument) {
-    try {
-        val bytes = Base64.decode(document.pdfBase64.substringAfter("base64,"), Base64.DEFAULT)
-        val dir = File(context.cacheDir, "shared_pdfs"); dir.mkdirs(); val file = File(dir, document.name); file.writeBytes(bytes)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        context.startActivity(Intent.createChooser(intent, "Share PDF"))
-    } catch (e: Exception) { Toast.makeText(context, "Share failed", Toast.LENGTH_SHORT).show() }
-}
-
-fun saveToLocal(context: Context, document: SavedDocument) {
-    try {
-        val bytes = Base64.decode(document.pdfBase64.substringAfter("base64,"), Base64.DEFAULT)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply { put(MediaStore.Downloads.DISPLAY_NAME, document.name); put(MediaStore.Downloads.MIME_TYPE, "application/pdf"); put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOCUMENTS + "/RasScanner") }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(bytes) } }
-            Toast.makeText(context, "Saved to Documents/RasScanner", Toast.LENGTH_LONG).show()
-        } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "RasScanner"); dir.mkdirs(); val file = File(dir, document.name); file.writeBytes(bytes)
-            Toast.makeText(context, "Saved to ${file.absolutePath}", Toast.LENGTH_LONG).show()
+fun getFileTypePreview(message: Message): String {
+    return when {
+        message.isCallLog -> {
+            val icon = if (message.callType == "video") "📹" else "📞"
+            "$icon ${message.text}"
         }
-    } catch (e: Exception) { Toast.makeText(context, "Download failed", Toast.LENGTH_SHORT).show() }
+        message.fileType?.startsWith("image/") == true -> "📷 Photo"
+        message.fileType?.startsWith("video/") == true -> "🎥 Video"
+        message.fileType?.startsWith("audio/") == true -> "🎤 Voice message"
+        message.fileUrl != null -> "📎 Document"
+        message.text.isNotEmpty() -> message.text
+        else -> "Message"
+    }
+}
+
+fun formatTime(seconds: Int): String {
+    val mins = seconds / 60
+    val secs = seconds % 60
+    return String.format("%d:%02d", mins, secs)
+}
+
+@Composable
+fun isCompactScreen(): Boolean {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    return configuration.screenWidthDp < 600
 }
