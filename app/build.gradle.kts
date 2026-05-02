@@ -6,6 +6,7 @@ plugins {
 }
 
 android {
+    // আপনার কথামতো প্যাকেজ নেম আপডেট করা হলো
     namespace = "com.tanimul.android_template_kotlin"
     compileSdk = 34
 
@@ -33,13 +34,12 @@ android {
     }
     
     compileOptions {
-        // আধুনিক Compose এবং Kotlin 2.0 এর জন্য Java 17 রিকমেন্ডেড
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     
     kotlinOptions {
-        jvmTarget = "17" // Java 17 এর সাথে সিঙ্ক করা হলো
+        jvmTarget = "17" 
     }
     
     buildFeatures {
@@ -66,7 +66,7 @@ dependencies {
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.8.3")
 
-    // Compose BOM (Bill of Materials) - Updated to newer stable
+    // Compose BOM 
     val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -104,14 +104,24 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
 
     // ==========================================
-    // 🔥 Firebase
+    // 🔥 Firebase (Auth, Firestore, Storage, Analytics)
     // ==========================================
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-database")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")
+    
+    // Coroutines support for Firebase Tasks (.await() ফাংশনের জন্য)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // ==========================================
-    // 🤖 ML Kit (For QR Code & OCR Text Recognition) -> NEW
+    // 📞 WebRTC (For Audio & Video Calls)
+    // ==========================================
+    implementation("org.webrtc:google-webrtc:1.0.32006")
+
+    // ==========================================
+    // 🤖 ML Kit (For QR Code & OCR Text Recognition)
     // ==========================================
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
