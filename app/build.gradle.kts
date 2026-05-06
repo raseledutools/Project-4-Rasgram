@@ -57,6 +57,7 @@ dependencies {
     // Core Android dependencies
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation 'com.cloudinary:cloudinary-android:2.5.0' // (এখানে Cloudinary-এর লেটেস্ট ভার্সন ব্যবহার করবেন)
     
     // Compose lifecycle and activity
     implementation("androidx.activity:activity-compose:1.9.3")
