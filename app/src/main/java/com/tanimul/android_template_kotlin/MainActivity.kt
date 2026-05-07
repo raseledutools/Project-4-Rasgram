@@ -24,25 +24,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.onDrawWithContent
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
-import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import org.webrtc.*
@@ -52,15 +54,9 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.content.ContentValues
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import androidx.core.net.toUri
 import java.io.File
-import java.io.FileOutputStream
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.compose.ui.viewinterop.AndroidView
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -143,9 +139,8 @@ class MainActivity : ComponentActivity() {
         FirebaseApp.initializeApp(this)
 
         val db = FirebaseFirestore.getInstance()
+        // FIX: Use the new cache config API instead of deprecated setPersistenceEnabled
         val settings = FirebaseFirestoreSettings.Builder()
-            .setPersistenceEnabled(true)
-            .setCacheSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
             .build()
         db.firestoreSettings = settings
 
@@ -164,7 +159,7 @@ fun RasGramApp() {
     var isLoggedIn by remember {
         mutableStateOf(
             prefs.getString(PREF_MOBILE, null) != null &&
-            prefs.getString(PREF_NAME_KEY, null) != null
+                    prefs.getString(PREF_NAME_KEY, null) != null
         )
     }
     var currentUser by remember {
@@ -310,7 +305,6 @@ fun LoginScreen(onLogin: (User) -> Unit) {
                                         isLoading = false
                                         return@launch
                                     }
-                                    // Update last active
                                     userRef.update("lastActive", System.currentTimeMillis())
                                 } else {
                                     val userData = hashMapOf(
@@ -337,7 +331,9 @@ fun LoginScreen(onLogin: (User) -> Unit) {
                         Toast.makeText(context, "Please fill all details correctly.", Toast.LENGTH_SHORT).show()
                     }
                 },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
                 enabled = !isLoading,
                 shape = RoundedCornerShape(12.dp)
@@ -370,8 +366,8 @@ fun MainChatScreen(
     var showCallUI by remember { mutableStateOf(false) }
     var callType by remember { mutableStateOf("audio") }
     var liveCurrentUser by remember { mutableStateOf(currentUser) }
+    val isCompact = isCompactScreen()
 
-    // Sync current user profile changes from Firestore
     val db = remember { FirebaseFirestore.getInstance() }
     LaunchedEffect(currentUser.mobile) {
         db.collection("chat_users").document(currentUser.mobile)
@@ -383,7 +379,6 @@ fun MainChatScreen(
                     )
                 }
             }
-        // Update last active every 60 seconds
         while (true) {
             db.collection("chat_users").document(currentUser.mobile)
                 .update("lastActive", System.currentTimeMillis())
@@ -395,11 +390,13 @@ fun MainChatScreen(
         containerColor = if (isLightMode) RasGramTheme.LightBackground else RasGramTheme.DarkBackground
     ) { padding ->
         Row(
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
             // Sidebar
             AnimatedVisibility(
-                visible = selectedContact == null || !isCompactScreen(),
+                visible = selectedContact == null || !isCompact,
                 modifier = Modifier.fillMaxHeight()
             ) {
                 SidebarPanel(
@@ -421,7 +418,9 @@ fun MainChatScreen(
 
             // Chat Area
             Box(
-                modifier = Modifier.weight(1f).fillMaxHeight()
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
             ) {
                 if (selectedContact != null) {
                     ChatArea(
@@ -434,7 +433,7 @@ fun MainChatScreen(
                         }
                     )
                 } else {
-                    if (!isCompactScreen()) EmptyChatState()
+                    if (!isCompact) EmptyChatState()
                 }
             }
         }
@@ -494,7 +493,6 @@ fun CallingScreen(
     var callSeconds by remember { mutableIntStateOf(0) }
     var callId by remember { mutableStateOf("") }
 
-    // WebRTC
     val eglBase = remember { EglBase.create() }
     val peerConnectionFactory = remember {
         PeerConnectionFactory.initialize(
@@ -520,11 +518,9 @@ fun CallingScreen(
     var localSurfaceView by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     var remoteSurfaceView by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
 
-    // Permission check
     val hasMicPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     val hasCamPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
-    // Audio Manager
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
     LaunchedEffect(Unit) {
@@ -568,23 +564,23 @@ fun CallingScreen(
                 continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             }
 
-            val iceCandidatesList = mutableListOf<IceCandidate>()
-
             val observer = object : PeerConnection.Observer {
                 override fun onIceCandidate(candidate: IceCandidate?) {
                     candidate?.let {
-                        iceCandidatesList.add(it)
                         scope.launch {
                             db.collection("calls").document(callId)
                                 .collection("caller_ice")
-                                .add(mapOf(
-                                    "sdpMid" to it.sdpMid,
-                                    "sdpMLineIndex" to it.sdpMLineIndex,
-                                    "candidate" to it.sdp
-                                ))
+                                .add(
+                                    mapOf(
+                                        "sdpMid" to it.sdpMid,
+                                        "sdpMLineIndex" to it.sdpMLineIndex,
+                                        "candidate" to it.sdp
+                                    )
+                                )
                         }
                     }
                 }
+
                 override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
                 override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
                 override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
@@ -600,11 +596,13 @@ fun CallingScreen(
                         else -> {}
                     }
                 }
+
                 override fun onIceConnectionReceivingChange(b: Boolean) {}
                 override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
                 override fun onAddStream(s: MediaStream?) {
                     s?.videoTracks?.firstOrNull()?.let { remoteVideoTrack = it }
                 }
+
                 override fun onRemoveStream(s: MediaStream?) {}
                 override fun onDataChannel(d: DataChannel?) {}
                 override fun onRenegotiationNeeded() {}
@@ -620,7 +618,6 @@ fun CallingScreen(
             }
             peerConnection = pc
 
-            // Create offer
             val offerConstraints = MediaConstraints().apply {
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                 if (callType == "video") {
@@ -646,17 +643,18 @@ fun CallingScreen(
                                     db.collection("calls").document(callId).set(callData)
                                 }
                             }
+
                             override fun onCreateFailure(e: String?) {}
                             override fun onSetFailure(e: String?) {}
                         }, it)
                     }
                 }
+
                 override fun onSetSuccess() {}
                 override fun onCreateFailure(e: String?) {}
                 override fun onSetFailure(e: String?) {}
             }, offerConstraints)
 
-            // Listen for answer + status
             db.collection("calls").document(callId)
                 .addSnapshotListener { snapshot, _ ->
                     val data = snapshot?.data ?: return@addSnapshotListener
@@ -671,7 +669,6 @@ fun CallingScreen(
                             override fun onSetSuccess() {
                                 callStatus = "Connected"
                                 isConnected = true
-                                // Add queued ICE candidates from callee
                                 scope.launch {
                                     db.collection("calls").document(callId)
                                         .collection("callee_ice").get().await()
@@ -686,6 +683,7 @@ fun CallingScreen(
                                         }
                                 }
                             }
+
                             override fun onCreateFailure(e: String?) {}
                             override fun onSetFailure(e: String?) {}
                         }, answerSdp)
@@ -700,7 +698,6 @@ fun CallingScreen(
         }
     }
 
-    // Call timer
     LaunchedEffect(isConnected) {
         if (isConnected) {
             while (true) {
@@ -718,7 +715,8 @@ fun CallingScreen(
             localStream = null
             audioManager.mode = AudioManager.MODE_NORMAL
             audioManager.isSpeakerphoneOn = false
-            eglBase.release()
+            // FIX: release eglBase safely
+            try { eglBase.release() } catch (_: Exception) {}
         }
     }
 
@@ -727,7 +725,6 @@ fun CallingScreen(
         color = Color(0xFF0B141A)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Remote video background (video call)
             if (callType == "video") {
                 AndroidView(
                     factory = { ctx ->
@@ -741,7 +738,6 @@ fun CallingScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Local video small box
                 AndroidView(
                     factory = { ctx ->
                         SurfaceViewRenderer(ctx).also {
@@ -759,7 +755,6 @@ fun CallingScreen(
                 )
             }
 
-            // Overlay UI
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -785,7 +780,6 @@ fun CallingScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 } else {
-                    // During video call, show timer at top
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = Color.Black.copy(alpha = 0.5f)
@@ -801,7 +795,6 @@ fun CallingScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Controls
                 Surface(
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                     color = Color(0xFF182229).copy(alpha = 0.9f),
@@ -815,7 +808,6 @@ fun CallingScreen(
                             horizontalArrangement = Arrangement.spacedBy(24.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Mute
                             CallControlButton(
                                 icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                                 label = if (isMuted) "Unmute" else "Mute",
@@ -826,7 +818,6 @@ fun CallingScreen(
                                 localStream?.audioTracks?.firstOrNull()?.setEnabled(!isMuted)
                             }
 
-                            // End Call
                             FloatingActionButton(
                                 onClick = {
                                     scope.launch {
@@ -842,7 +833,6 @@ fun CallingScreen(
                                 Icon(Icons.Default.CallEnd, contentDescription = "End", tint = Color.White, modifier = Modifier.size(32.dp))
                             }
 
-                            // Speaker
                             CallControlButton(
                                 icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
                                 label = "Speaker",
@@ -906,7 +896,9 @@ fun getVideoCapturer(context: Context): VideoCapturer? {
             val enumerator = Camera1Enumerator(false)
             enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
                 ?.let { enumerator.createCapturer(it, null) }
-        } catch (e2: Exception) { null }
+        } catch (e2: Exception) {
+            null
+        }
     }
 }
 
@@ -947,7 +939,6 @@ fun SidebarPanel(
         }
     }
 
-    // Load latest messages for each contact
     LaunchedEffect(users) {
         users.forEach { user ->
             val chatId = generateChatId(currentUser.mobile, user.mobile)
@@ -974,22 +965,32 @@ fun SidebarPanel(
         }
     }
 
+    val isCompact = isCompactScreen()
+
     Column(
         modifier = Modifier
             .fillMaxHeight()
-            .width(if (isCompactScreen()) 400.dp else 360.dp)
+            // FIX: use correct width based on screen, avoid calling isCompactScreen inside non-composable
+            .width(if (isCompact) 400.dp else 360.dp)
             .background(RasGramTheme.DarkBackground)
-            .border(end = 1.dp, color = RasGramTheme.Border)
+            // FIX: renamed extension to rightBorder to avoid conflict with built-in Modifier.border
+            .rightBorder(1.dp, RasGramTheme.Border)
     ) {
         // Header
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp).height(64.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .height(64.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
                 model = currentUser.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${currentUser.name}" },
                 contentDescription = "Avatar",
-                modifier = Modifier.size(38.dp).clip(CircleShape).clickable { onSettingsClick() }
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable { onSettingsClick() }
             )
             Spacer(modifier = Modifier.width(10.dp))
             Row {
@@ -1006,21 +1007,42 @@ fun SidebarPanel(
                     Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = RasGramTheme.TextMuted)
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(text = { Text("New Group") }, onClick = { onNewGroupClick(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Group, null) })
-                    DropdownMenuItem(text = { Text("Settings") }, onClick = { onSettingsClick(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Settings, null) })
-                    DropdownMenuItem(text = { Text("Toggle Theme") }, onClick = { onToggleTheme(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Brightness6, null) })
-                    DropdownMenuItem(text = { Text("Locked Chats") }, onClick = { onLockedChatsClick(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Lock, null, tint = RasGramTheme.Green) })
+                    DropdownMenuItem(
+                        text = { Text("New Group") },
+                        onClick = { onNewGroupClick(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Group, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = { onSettingsClick(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Settings, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Toggle Theme") },
+                        onClick = { onToggleTheme(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Brightness6, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Locked Chats") },
+                        onClick = { onLockedChatsClick(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Lock, null, tint = RasGramTheme.Green) }
+                    )
                     HorizontalDivider(color = RasGramTheme.Border)
-                    DropdownMenuItem(text = { Text("Logout", color = RasGramTheme.Red) }, onClick = { onLogout(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Logout, null, tint = RasGramTheme.Red) })
+                    DropdownMenuItem(
+                        text = { Text("Logout", color = RasGramTheme.Red) },
+                        onClick = { onLogout(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Logout, null, tint = RasGramTheme.Red) }
+                    )
                 }
             }
         }
 
-        // Search
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             placeholder = { Text("Search or start new chat", color = RasGramTheme.TextMuted) },
             leadingIcon = { Icon(Icons.Default.Search, null, tint = RasGramTheme.TextMuted) },
             colors = outlinedFieldColors(),
@@ -1029,10 +1051,15 @@ fun SidebarPanel(
 
         if (!isViewingLocked) {
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable { onLockedChatsClick() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onLockedChatsClick() },
                 color = Color.Transparent
             ) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(modifier = Modifier.size(44.dp), shape = CircleShape, color = RasGramTheme.Green.copy(alpha = 0.1f)) {
                         Icon(Icons.Default.Lock, null, tint = RasGramTheme.Green, modifier = Modifier.padding(12.dp))
                     }
@@ -1074,7 +1101,9 @@ fun ContactItem(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         color = if (isSelected) RasGramTheme.DarkPanel else Color.Transparent
     ) {
         Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1082,24 +1111,34 @@ fun ContactItem(
                 AsyncImage(
                     model = user.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${user.name}&background=8696a0&color=fff&bold=true" },
                     contentDescription = "Avatar",
-                    modifier = Modifier.size(50.dp).clip(CircleShape),
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape),
                     contentScale = ContentScale.Crop
                 )
-                // Online indicator
                 if (user.lastActive > System.currentTimeMillis() - 120_000) {
-                    Surface(
-                        modifier = Modifier.size(12.dp).align(Alignment.BottomEnd),
-                        shape = CircleShape,
-                        color = RasGramTheme.Green,
-                        border = BorderStroke(2.dp, RasGramTheme.DarkBackground)
-                    ) {}
+                    // FIX: Use Box with background instead of Surface with border to avoid BorderStroke conflict
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .align(Alignment.BottomEnd)
+                            .border(2.dp, RasGramTheme.DarkBackground, CircleShape)
+                            .background(RasGramTheme.Green, CircleShape)
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(user.name, style = MaterialTheme.typography.bodyLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    user.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = RasGramTheme.TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(modifier = Modifier.height(2.dp))
                 if (user.typingTo != null) {
                     Text("typing...", style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.Green, fontWeight = FontWeight.Medium)
@@ -1118,11 +1157,21 @@ fun ContactItem(
 
             latestMessage?.let { msg ->
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(msg.timeString, style = MaterialTheme.typography.bodySmall, color = if (!msg.read && msg.senderMobile != currentUserMobile) RasGramTheme.Green else RasGramTheme.TextMuted)
+                    Text(
+                        msg.timeString,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (!msg.read && msg.senderMobile != currentUserMobile) RasGramTheme.Green else RasGramTheme.TextMuted
+                    )
                     if (!msg.read && msg.senderMobile != currentUserMobile) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Surface(shape = CircleShape, color = RasGramTheme.Green) {
-                            Text("1", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text(
+                                "1",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -1147,12 +1196,12 @@ fun ChatArea(
     val context = LocalContext.current
     var isUploading by remember { mutableStateOf(false) }
     var liveContact by remember { mutableStateOf(contact) }
+    val isCompact = isCompactScreen()
 
     val chatId = remember(currentUser.mobile, contact.mobile) {
         generateChatId(currentUser.mobile, contact.mobile)
     }
 
-    // File picker launcher
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             isUploading = true
@@ -1173,10 +1222,8 @@ fun ChatArea(
         }
     }
 
-    // Permission launcher
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
-    // Load messages
     LaunchedEffect(chatId) {
         db.collection("pvt_msg_$chatId")
             .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -1206,7 +1253,6 @@ fun ChatArea(
             }
     }
 
-    // Live contact status
     LaunchedEffect(contact.mobile) {
         db.collection("chat_users").document(contact.mobile)
             .addSnapshotListener { snap, _ ->
@@ -1219,7 +1265,6 @@ fun ChatArea(
             }
     }
 
-    // Mark as read
     LaunchedEffect(contact.mobile, messages.size) {
         messages.filter { it.senderMobile == contact.mobile && !it.read }
             .forEach { msg ->
@@ -1227,7 +1272,6 @@ fun ChatArea(
             }
     }
 
-    // Scroll to bottom
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -1240,10 +1284,14 @@ fun ChatArea(
         // Header
         Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp).height(64.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .height(64.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isCompactScreen()) {
+                // FIX: use captured isCompact variable, not function call inside non-composable lambda
+                if (isCompact) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, null, tint = RasGramTheme.TextMuted)
                     }
@@ -1251,7 +1299,9 @@ fun ChatArea(
                 AsyncImage(
                     model = liveContact.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${liveContact.name}" },
                     contentDescription = "Avatar",
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -1281,12 +1331,15 @@ fun ChatArea(
                         Icon(Icons.Default.MoreVert, null, tint = RasGramTheme.TextMuted)
                     }
                     DropdownMenu(expanded = showChatMenu, onDismissRequest = { showChatMenu = false }) {
-                        DropdownMenuItem(text = { Text("Clear Chat", color = RasGramTheme.Red) }, onClick = {
-                            showChatMenu = false
-                            coroutineScope.launch {
-                                db.collection("pvt_msg_$chatId").get().await().documents.forEach { it.reference.delete() }
+                        DropdownMenuItem(
+                            text = { Text("Clear Chat", color = RasGramTheme.Red) },
+                            onClick = {
+                                showChatMenu = false
+                                coroutineScope.launch {
+                                    db.collection("pvt_msg_$chatId").get().await().documents.forEach { it.reference.delete() }
+                                }
                             }
-                        })
+                        )
                     }
                 }
             }
@@ -1294,7 +1347,10 @@ fun ChatArea(
 
         // Messages
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth().background(RasGramTheme.DarkBackground.copy(alpha = 0.95f)),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(RasGramTheme.DarkBackground.copy(alpha = 0.95f)),
             state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -1306,7 +1362,9 @@ fun ChatArea(
                     color = Color(0xFF182229)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1334,7 +1392,6 @@ fun ChatArea(
             }
         }
 
-        // Upload indicator
         if (isUploading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
@@ -1345,7 +1402,9 @@ fun ChatArea(
         // Input Area
         Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
@@ -1368,7 +1427,9 @@ fun ChatArea(
                             }
                         }
                     },
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 120.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp, max = 120.dp),
                     placeholder = { Text("Type a message", color = RasGramTheme.TextMuted) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.Transparent,
@@ -1395,9 +1456,13 @@ fun ChatArea(
                     )
                 )
 
+                // FIX: Use updated AnimatedContent API (no togetherWith infix, use with())
                 AnimatedContent(
                     targetState = inputText.isNotEmpty(),
-                    transitionSpec = { fadeIn() + scaleIn() togetherWith fadeOut() + scaleOut() }
+                    transitionSpec = {
+                        (fadeIn() + scaleIn()).togetherWith(fadeOut() + scaleOut())
+                    },
+                    label = "SendButton"
                 ) { hasText ->
                     if (hasText) {
                         IconButton(onClick = {
@@ -1432,7 +1497,8 @@ suspend fun uploadToCloudinary(
         val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
         val fileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
 
-        val inputStream: InputStream = contentResolver.openInputStream(uri) ?: return@withContext Triple(null, null, null)
+        val inputStream: InputStream = contentResolver.openInputStream(uri)
+            ?: return@withContext Triple(null, null, null)
         val tempFile = File(context.cacheDir, fileName)
         tempFile.outputStream().use { out -> inputStream.copyTo(out) }
 
@@ -1472,7 +1538,9 @@ fun getFileName(context: Context, uri: Uri): String? {
             cursor.moveToFirst()
             cursor.getString(idx)
         }
-    } catch (e: Exception) { null }
+    } catch (e: Exception) {
+        null
+    }
 }
 
 // ==================== SEND MESSAGE ====================
@@ -1559,35 +1627,61 @@ fun MessageBubble(
                                 AsyncImage(
                                     model = url,
                                     contentDescription = "Image",
-                                    modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(4.dp)).clickable {
-                                        // Open in browser/viewer
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
-                                        context.startActivity(intent)
-                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 200.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
+                                            context.startActivity(intent)
+                                        },
                                     contentScale = ContentScale.Crop
                                 )
                             }
+
                             message.fileType?.startsWith("video/") == true -> {
                                 Surface(
-                                    modifier = Modifier.fillMaxWidth().height(200.dp).clickable {
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
-                                        intent.setDataAndType(url.toUri(), message.fileType)
-                                        context.startActivity(intent)
-                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp)
+                                        .clickable {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
+                                            intent.setDataAndType(url.toUri(), message.fileType)
+                                            context.startActivity(intent)
+                                        },
                                     color = Color.Black.copy(alpha = 0.5f),
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.PlayCircle, null, tint = Color.White, modifier = Modifier.size(56.dp))
-                                        Text(message.fileName ?: "Video", color = Color.White.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp), style = MaterialTheme.typography.labelSmall)
+                                        Text(
+                                            message.fileName ?: "Video",
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .padding(8.dp),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
                                     }
                                 }
                             }
+
                             message.fileType?.startsWith("audio/") == true -> {
                                 var isPlaying by remember { mutableStateOf(false) }
+                                // FIX: wrap MediaPlayer in DisposableEffect to prevent leaks
                                 val mediaPlayer = remember { MediaPlayer() }
+                                DisposableEffect(Unit) {
+                                    onDispose {
+                                        try {
+                                            if (mediaPlayer.isPlaying) mediaPlayer.stop()
+                                            mediaPlayer.release()
+                                        } catch (_: Exception) {}
+                                    }
+                                }
                                 Row(
-                                    modifier = Modifier.width(220.dp).padding(8.dp),
+                                    modifier = Modifier
+                                        .width(220.dp)
+                                        .padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     IconButton(onClick = {
@@ -1599,7 +1693,7 @@ fun MessageBubble(
                                                 mediaPlayer.start()
                                                 isPlaying = true
                                                 mediaPlayer.setOnCompletionListener { isPlaying = false }
-                                            } catch (e: Exception) { }
+                                            } catch (_: Exception) {}
                                         } else {
                                             mediaPlayer.pause()
                                             isPlaying = false
@@ -1607,26 +1701,43 @@ fun MessageBubble(
                                     }) {
                                         Icon(
                                             if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            null, tint = RasGramTheme.TextPrimary
+                                            null,
+                                            tint = RasGramTheme.TextPrimary
                                         )
                                     }
                                     Icon(Icons.Default.Mic, null, tint = RasGramTheme.Green, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.weight(1f))
-                                    Text(message.fileName ?: "Audio", style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 80.dp))
+                                    Text(
+                                        message.fileName ?: "Audio",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = RasGramTheme.TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 80.dp)
+                                    )
                                 }
                             }
+
                             else -> {
                                 Row(
-                                    modifier = Modifier.padding(8.dp).clickable {
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
-                                        context.startActivity(intent)
-                                    },
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .clickable {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
+                                            context.startActivity(intent)
+                                        },
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.Default.Description, null, tint = RasGramTheme.Green, modifier = Modifier.size(36.dp))
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
-                                        Text(message.fileName ?: "Document", style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            message.fileName ?: "Document",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = RasGramTheme.TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         Text("Tap to open", style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted)
                                     }
                                 }
@@ -1635,7 +1746,12 @@ fun MessageBubble(
                     }
 
                     if (message.text.isNotEmpty()) {
-                        Text(message.text, style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextPrimary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                        Text(
+                            message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = RasGramTheme.TextPrimary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
                     }
 
                     Row(modifier = Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -1658,12 +1774,18 @@ fun MessageBubble(
             }
 
             if (showReactions) {
-                Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     listOf("👍", "❤️", "😂", "😢", "😮", "🙏").forEach { emoji ->
                         Surface(
-                            modifier = Modifier.clip(CircleShape).clickable { onReact(emoji); showReactions = false },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onReact(emoji); showReactions = false },
                             shape = CircleShape,
                             color = RasGramTheme.DarkPanel,
+                            // FIX: Use border parameter on Surface correctly
                             border = BorderStroke(1.dp, RasGramTheme.Border)
                         ) {
                             Text(emoji, modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge)
@@ -1671,7 +1793,9 @@ fun MessageBubble(
                     }
                     if (isMe) {
                         Surface(
-                            modifier = Modifier.clip(CircleShape).clickable { showDeleteConfirm = true },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { showDeleteConfirm = true },
                             shape = CircleShape,
                             color = RasGramTheme.Red.copy(alpha = 0.2f),
                             border = BorderStroke(1.dp, RasGramTheme.Red.copy(alpha = 0.5f))
@@ -1747,7 +1871,10 @@ fun SettingsDialog(currentUser: User, onDismiss: () -> Unit, onSave: () -> Unit)
                     AsyncImage(
                         model = avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${currentUser.name}" },
                         contentDescription = "Profile",
-                        modifier = Modifier.size(100.dp).clip(CircleShape).border(2.dp, RasGramTheme.Green, CircleShape)
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, RasGramTheme.Green, CircleShape)
                     )
                     FloatingActionButton(
                         onClick = { imageLauncher.launch(arrayOf("image/*")) },
@@ -1799,17 +1926,29 @@ fun NewGroupDialog(onDismiss: () -> Unit, onCreateGroup: () -> Unit) {
         title = { Text("New Group", color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                OutlinedTextField(value = groupName, onValueChange = { groupName = it }, label = { Text("Group Name") }, modifier = Modifier.fillMaxWidth(), colors = outlinedFieldColors())
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text("Group Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = outlinedFieldColors()
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Group chat coming soon!", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
-            Button(onClick = onCreateGroup, colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green), enabled = groupName.isNotBlank()) {
+            Button(
+                onClick = onCreateGroup,
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                enabled = groupName.isNotBlank()
+            ) {
                 Text("Create", color = Color.Black)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = RasGramTheme.TextMuted) } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = RasGramTheme.TextMuted) }
+        }
     )
 }
 
@@ -1821,7 +1960,10 @@ fun LockedChatsDialog(onDismiss: () -> Unit) {
         title = { Text("Locked Chats", color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold) },
         text = { Text("These chats are locked with your PIN.", color = RasGramTheme.TextMuted) },
         confirmButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)) {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)
+            ) {
                 Text("OK", color = Color.Black)
             }
         }
@@ -1830,14 +1972,23 @@ fun LockedChatsDialog(onDismiss: () -> Unit) {
 
 @Composable
 fun EmptyChatState() {
-    Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
         Surface(modifier = Modifier.size(120.dp), shape = CircleShape, color = RasGramTheme.DarkPanel) {
             Icon(Icons.Default.Send, null, modifier = Modifier.padding(30.dp), tint = RasGramTheme.Green)
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text("RasGram", style = MaterialTheme.typography.headlineLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Light)
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Send and receive messages securely.\nEnd-to-end encrypted.", style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(
+            "Send and receive messages securely.\nEnd-to-end encrypted.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = RasGramTheme.TextMuted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
         Spacer(modifier = Modifier.height(32.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = RasGramTheme.Green)
@@ -1888,23 +2039,25 @@ fun outlinedFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedLabelColor = RasGramTheme.TextMuted
 )
 
-@Composable
-fun isCompactScreen(): Boolean {
-    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    return configuration.screenWidthDp < 600
-}
-
-// Extension for border on one side
-fun Modifier.border(end: Dp, color: Color): Modifier = this.then(
+// FIX: Renamed from border() to rightBorder() to avoid conflict with built-in Modifier.border()
+fun Modifier.rightBorder(width: Dp, color: Color): Modifier = this.then(
     Modifier.drawWithCache {
         onDrawWithContent {
             drawContent()
             drawLine(
                 color = color,
-                start = androidx.compose.ui.geometry.Offset(size.width, 0f),
-                end = androidx.compose.ui.geometry.Offset(size.width, size.height),
-                strokeWidth = end.toPx()
+                start = Offset(size.width, 0f),
+                end = Offset(size.width, size.height),
+                strokeWidth = width.toPx()
             )
         }
     }
 )
+
+// FIX: isCompactScreen must always be called inside @Composable context;
+// capture the value at the top of composable functions and pass it down.
+@Composable
+fun isCompactScreen(): Boolean {
+    val configuration = LocalConfiguration.current
+    return configuration.screenWidthDp < 600
+}
