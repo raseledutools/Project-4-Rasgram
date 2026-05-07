@@ -39,7 +39,8 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
+            // applicationIdSuffix বাদ দেওয়া হলো
+            // কারণ google-services.json এ debug package নেই
         }
     }
 
