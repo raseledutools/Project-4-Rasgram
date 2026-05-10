@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "com.tanimul.android_template_kotlin"
+    namespace = "com.rasel.rasgram"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tanimul.android_template_kotlin"
+        applicationId = "com.rasel.rasgram"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

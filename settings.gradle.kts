@@ -21,5 +21,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Android-Template-Kotlin"
+rootProject.name = "Rasgram"
 include(":app")
