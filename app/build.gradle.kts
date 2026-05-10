@@ -115,10 +115,12 @@ dependencies {
     implementation("androidx.compose.runtime:runtime")
     implementation("androidx.compose.runtime:runtime-livedata")
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // ─── Image Loading ────────────────────────────────────────────────────────
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
+    implementation("io.coil-kt.coil3:coil:3.0.4")
 
     // ─── File Picker ──────────────────────────────────────────────────────────
     implementation("androidx.documentfile:documentfile:1.0.1")

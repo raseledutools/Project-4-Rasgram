@@ -24,10 +24,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.onDrawWithContent
+
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -2041,16 +2041,13 @@ fun outlinedFieldColors() = OutlinedTextFieldDefaults.colors(
 
 // FIX: Renamed from border() to rightBorder() to avoid conflict with built-in Modifier.border()
 fun Modifier.rightBorder(width: Dp, color: Color): Modifier = this.then(
-    Modifier.drawWithCache {
-        onDrawWithContent {
-            drawContent()
-            drawLine(
-                color = color,
-                start = Offset(size.width, 0f),
-                end = Offset(size.width, size.height),
-                strokeWidth = width.toPx()
-            )
-        }
+    Modifier.drawBehind {
+        drawLine(
+            color = color,
+            start = Offset(size.width, 0f),
+            end = Offset(size.width, size.height),
+            strokeWidth = width.toPx()
+        )
     }
 )
 
