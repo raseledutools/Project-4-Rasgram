@@ -918,10 +918,10 @@ fun MainScreen(
 fun BottomNavBar(selectedTab: Int, onTabChange: (Int) -> Unit) {
     NavigationBar(containerColor = RasGramTheme.DarkPanel, tonalElevation = 0.dp) {
         val tabs = listOf(
-            Triple(Icons.Default.Chat, Icons.Outlined.Chat, "Chats"),
-            Triple(Icons.Default.Circle, Icons.Outlined.Circle, "Status"),
-            Triple(Icons.Default.Call, Icons.Outlined.Call, "Calls"),
-            Triple(Icons.Default.Group, Icons.Outlined.Group, "Groups")
+            Triple(Icons.Default.Message, Icons.Default.Message, "Chats"),
+            Triple(Icons.Default.RadioButtonChecked, Icons.Default.RadioButtonUnchecked, "Status"),
+            Triple(Icons.Default.Call, Icons.Default.Call, "Calls"),
+            Triple(Icons.Default.People, Icons.Default.People, "Groups")
         )
         tabs.forEachIndexed { i, (filledIcon, outlinedIcon, label) ->
             NavigationBarItem(
@@ -1113,7 +1113,7 @@ fun ChatsTab(
                         modifier = Modifier.fillMaxWidth().padding(48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.PersonAdd, null, modifier = Modifier.size(64.dp), tint = RasGramTheme.TextMuted.copy(0.4f))
+                        Icon(Icons.Default.PersonAddAlt, null, modifier = Modifier.size(64.dp), tint = RasGramTheme.TextMuted.copy(0.4f))
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("No contacts yet", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1182,7 +1182,7 @@ fun ChatsHeader(
             ) {
                 DropdownMenuItem(
                     text = { Text("New Group", color = RasGramTheme.TextPrimary) },
-                    leadingIcon = { Icon(Icons.Default.Group, null, tint = RasGramTheme.TextMuted) },
+                    leadingIcon = { Icon(Icons.Default.People, null, tint = RasGramTheme.TextMuted) },
                     onClick = { onNewGroupClick(); showMenu = false }
                 )
                 DropdownMenuItem(
@@ -1192,13 +1192,13 @@ fun ChatsHeader(
                 )
                 DropdownMenuItem(
                     text = { Text(if (true) "Light Mode" else "Dark Mode", color = RasGramTheme.TextPrimary) },
-                    leadingIcon = { Icon(Icons.Default.Brightness6, null, tint = RasGramTheme.TextMuted) },
+                    leadingIcon = { Icon(Icons.Default.WbSunny, null, tint = RasGramTheme.TextMuted) },
                     onClick = { onToggleTheme(); showMenu = false }
                 )
                 HorizontalDivider(color = RasGramTheme.Border)
                 DropdownMenuItem(
                     text = { Text("Logout", color = RasGramTheme.Red) },
-                    leadingIcon = { Icon(Icons.Default.Logout, null, tint = RasGramTheme.Red) },
+                    leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = RasGramTheme.Red) },
                     onClick = { onLogout(); showMenu = false }
                 )
             }
@@ -1306,9 +1306,9 @@ fun ContactItem(
                         if (latestMessage?.senderMobile == currentUserMobile && latestMessage != null) {
                             Icon(
                                 imageVector = when {
-                                    latestMessage.isPending -> Icons.Default.Schedule
-                                    latestMessage.read -> Icons.Default.DoneAll
-                                    latestMessage.delivered -> Icons.Default.DoneAll
+                                    latestMessage.isPending -> Icons.Default.AccessTime
+                                    latestMessage.read -> Icons.Default.Done
+                                    latestMessage.delivered -> Icons.Default.Done
                                     else -> Icons.Default.Check
                                 },
                                 contentDescription = null,
@@ -1862,7 +1862,7 @@ fun ChatHeader(
             }
 
             IconButton(onClick = { onCallClick("video") }) {
-                Icon(Icons.Default.Videocam, null, tint = RasGramTheme.TextMuted)
+                Icon(Icons.Default.VideoCall, null, tint = RasGramTheme.TextMuted)
             }
             IconButton(onClick = { onCallClick("audio") }) {
                 Icon(Icons.Default.Call, null, tint = RasGramTheme.TextMuted)
