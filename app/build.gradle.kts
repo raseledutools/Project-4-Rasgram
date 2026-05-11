@@ -1,8 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // ✅ FIX: Compose plugin version অবশ্যই Kotlin version এর সাথে মিলতে হবে
-    // libs.versions.toml এ kotlin = "2.1.10" তাই এখানেও "2.1.10"
+    // Compose plugin version Kotlin version (2.1.10) এর সাথে মিল থাকতে হবে
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.10"
     id("com.google.gms.google-services") version "4.4.2"
 }
@@ -24,8 +23,12 @@ android {
         }
 
         ndk {
+            // শুধু মাত্র আধুনিক ফোনগুলোর জন্য বিল্ড করবে, এতে APK সাইজ অনেক কমে যাবে
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+
+        // 🔥 PRO TIP: লাইব্রেরিগুলো থেকে অপ্রয়োজনীয় ভাষা ডিলিট করে শুধু ইংরেজি ও বাংলা রাখবে। এতে প্রায় ১-২ MB সাইজ কমবে।
+        resourceConfigurations += listOf("en", "bn")
     }
 
     buildTypes {
@@ -113,9 +116,10 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.runtime:runtime")
-    implementation("androidx.compose.runtime:runtime-livedata")
+    
+    // 🔥 FIX: material-icons-extended রিমুভ করা হয়েছে। এটি ৩-৪ MB সাইজ খায়। 
+    // যে আইকনগুলো লাগবে সেগুলো Google Fonts থেকে SVG ডাউনলোড করে res/drawable এ অ্যাড করে নিবেন।
     implementation("androidx.compose.material:material-icons-core")
-    implementation("androidx.compose.material:material-icons-extended")
 
     // ─── Image Loading ────────────────────────────────────────────────────────
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
@@ -134,18 +138,30 @@ dependencies {
 
     // ─── Firebase ────────────────────────────────────────────────────────────
     implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
-    implementation("com.google.firebase:firebase-analytics-ktx")
+    // 🔥 FIX: Analytics রিমুভ করা হয়েছে পারফরম্যান্স বুস্ট এবং সাইজ কমানোর জন্য
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
+    
+    // Firebase Cloud Messaging (FCM) - নোটিফিকেশনের জন্য আগের ধাপে বলেছিলাম
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // ─── ML Kit ──────────────────────────────────────────────────────────────
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // 🔥 FIX: চ্যাট অ্যাপে Barcode বা Text Recognition দরকার নেই। 
+    // এগুলো প্রায় ১০-১৫ MB সাইজ নিয়ে নিচ্ছিল। তাই বাদ দেওয়া হলো।
+    // implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // implementation("com.google.mlkit:text-recognition:16.0.1")
 
-    // ─── WebRTC (~15MB) — দরকার না হলে comment করুন ─────────────────────────
+    // ─── WebRTC (~15MB) ─────────────────────────
+    // ভিডিও বা অডিও কলের জন্য এটি মাস্ট লাগবে, তাই এটি রাখা হলো। 
     implementation("io.getstream:stream-webrtc-android:1.1.1")
+    
+    // Push Notification এর জন্য OkHttp
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    // FCM v1 API এর Access Token জেনারেট করার জন্য
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.19.0")
 
     // ─── Testing ──────────────────────────────────────────────────────────────
     testImplementation("junit:junit:4.13.2")
