@@ -1,17 +1,19 @@
 package com.rasel.rasgram
 
 import android.Manifest
-import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.OpenableColumns
-import android.util.Log
-import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -21,7 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,8 +33,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -41,50 +41,46 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.compose.rememberAsyncImagePainter
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.firestoreSettings
-import com.google.firebase.firestore.persistentCacheSettings
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.launch
+import com.google.firebase.firestore.*
+import com.google.firebase.firestore.ktx.snapshots
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
 import org.webrtc.*
@@ -94,46 +90,61 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 
-// ==================== CONSTANTS & CONFIGS ====================
+// ==================== CONSTANTS ====================
 const val CLOUDINARY_CLOUD_NAME = "de2w78yxh"
 const val CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/de2w78yxh/auto/upload"
 const val CLOUDINARY_UPLOAD_PRESET = "ml_default"
 const val PREF_NAME = "rasgram_prefs"
 const val PREF_MOBILE = "saved_mobile"
 const val PREF_NAME_KEY = "saved_name"
-const val PREF_IS_LOGGED_IN = "is_logged_in"
+const val PREF_UID = "saved_uid"
+const val PREF_AVATAR = "saved_avatar"
+const val MAX_RETRY = 3
+const val TYPING_DEBOUNCE_MS = 2500L
+const val ONLINE_THRESHOLD_MS = 120_000L
+const val MESSAGE_PAGE_SIZE = 30L
 
-// ==================== DATA MODELS ====================
+// ==================== DATA CLASSES ====================
 data class User(
-    val id: String = "",
+    val uid: String = "",
     val name: String = "",
     val mobile: String = "",
     val avatarUrl: String = "",
-    val about: String = "Hey there! I am using RasGram.",
     val lastActive: Long = 0,
     val typingTo: String? = null,
-    val isOnline: Boolean = false,
-    val pushToken: String = ""
+    val statusVisible: Boolean = true,
+    val about: String = "Hey there! I am using RasGram.",
+    val fcmToken: String = "",
+    val isBlocked: Boolean = false
 )
 
 data class Message(
     val id: String = "",
     val text: String = "",
     val senderMobile: String = "",
+    val receiverMobile: String = "",
     val timestamp: Long = 0,
     val timeString: String = "",
     val fileUrl: String? = null,
     val fileName: String? = null,
     val fileType: String? = null,
-    val fileSize: String? = null,
-    val replyToMessageId: String? = null,
+    val fileSizeBytes: Long = 0,
+    val thumbnailUrl: String? = null,
     val reaction: String? = null,
     val read: Boolean = false,
+    val delivered: Boolean = false,
     val isCallLog: Boolean = false,
     val callStatus: String? = null,
     val callType: String? = null,
+    val isPending: Boolean = false,
+    val replyToId: String? = null,
+    val replyToText: String? = null,
+    val replyToSender: String? = null,
+    val isDeleted: Boolean = false,
     val isForwarded: Boolean = false,
-    val isPending: Boolean = false
+    val isStarred: Boolean = false,
+    val duration: Int = 0,
+    val waveform: List<Float> = emptyList()
 )
 
 data class Status(
@@ -141,31 +152,74 @@ data class Status(
     val userMobile: String = "",
     val userName: String = "",
     val userAvatar: String = "",
-    val imageUrl: String = "",
-    val text: String = "",
+    val mediaUrl: String = "",
+    val mediaType: String = "image",
+    val caption: String = "",
     val timestamp: Long = 0,
+    val viewedBy: List<String> = emptyList(),
     val expiresAt: Long = 0
 )
 
-// ==================== THEME (WhatsApp / RasGram Custom) ====================
+data class CallData(
+    val id: String = "",
+    val caller: String = "",
+    val callee: String = "",
+    val type: String = "audio",
+    val status: String = "calling",
+    val timestamp: Long = 0,
+    val offer: Map<String, Any>? = null,
+    val answer: Map<String, Any>? = null
+)
+
+data class Group(
+    val id: String = "",
+    val name: String = "",
+    val avatarUrl: String = "",
+    val description: String = "",
+    val members: List<String> = emptyList(),
+    val admins: List<String> = emptyList(),
+    val createdBy: String = "",
+    val createdAt: Long = 0
+)
+
+data class ChatPreview(
+    val user: User? = null,
+    val group: Group? = null,
+    val lastMessage: Message? = null,
+    val unreadCount: Int = 0,
+    val isPinned: Boolean = false,
+    val isMuted: Boolean = false,
+    val isArchived: Boolean = false
+)
+
+// ==================== THEME ====================
 object RasGramTheme {
-    val DarkBackground = Color(0xFF111B21)
-    val DarkPanel = Color(0xFF202C33)
-    val DarkHeader = Color(0xFF202C33)
+    val DarkBackground = Color(0xFF0B141A)
+    val DarkPanel = Color(0xFF1F2C34)
+    val DarkSurface = Color(0xFF202C33)
     val Green = Color(0xFF00A884)
-    val GreenHover = Color(0xFF029071)
+    val GreenDark = Color(0xFF008069)
+    val GreenLight = Color(0xFF25D366)
     val TextPrimary = Color(0xFFE9EDEF)
+    val TextSecondary = Color(0xFFAEBCC5)
     val TextMuted = Color(0xFF8696A0)
     val BubbleIn = Color(0xFF202C33)
     val BubbleOut = Color(0xFF005C4B)
-    val BubbleReplyIn = Color(0xFF2A3942)
-    val BubbleReplyOut = Color(0xFF025144)
-    val Border = Color(0xFF222D34)
+    val Border = Color(0xFF2A3942)
     val BlueTick = Color(0xFF53BDEB)
-    val LightBackground = Color(0xFFEFEAE2)
-    val LightPanel = Color(0xFFFFFFFF)
-    val LightHeader = Color(0xFF008069)
-    val Red = Color(0xFFF15C6D)
+    val Red = Color(0xFFEA0038)
+    val Orange = Color(0xFFFF6B35)
+    val Yellow = Color(0xFFFFD279)
+    val LightBg = Color(0xFFEFEFEF)
+    val InputBg = Color(0xFF2A3942)
+    val DividerColor = Color(0xFF2C3E48)
+    val OnlineGreen = Color(0xFF25D366)
+    val CallGreen = Color(0xFF00BFA5)
+    val CallRed = Color(0xFFF44336)
+    val PinnedColor = Color(0xFF3B4A54)
+    val Gradient1 = Color(0xFF00A884)
+    val Gradient2 = Color(0xFF025144)
+    val StarColor = Color(0xFFFFD700)
 }
 
 // ==================== MAIN ACTIVITY ====================
@@ -174,16 +228,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         FirebaseApp.initializeApp(this)
 
-        // Super Fast Offline Persistence
         val db = FirebaseFirestore.getInstance()
-        val settings = firestoreSettings {
-            setLocalCacheSettings(persistentCacheSettings {})
-        }
+        val settings = FirebaseFirestoreSettings.Builder()
+            .setLocalCacheSettings(
+                MemoryCacheSettings.newBuilder()
+                    .setSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+                    .build()
+            )
+            .build()
         db.firestoreSettings = settings
 
-        setContent {
-            RasGramApp()
-        }
+        setContent { RasGramApp() }
     }
 }
 
@@ -192,671 +247,1809 @@ class MainActivity : ComponentActivity() {
 fun RasGramApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE) }
-    
-    var isLoggedIn by remember { mutableStateOf(prefs.getBoolean(PREF_IS_LOGGED_IN, false)) }
-    var currentUserMobile by remember { mutableStateOf(prefs.getString(PREF_MOBILE, "") ?: "") }
-    var isLightMode by remember { mutableStateOf(false) }
 
-    val db = remember { FirebaseFirestore.getInstance() }
+    var isLoggedIn by remember {
+        mutableStateOf(prefs.getString(PREF_MOBILE, null) != null && prefs.getString(PREF_UID, null) != null)
+    }
+    var currentUser by remember {
+        mutableStateOf(
+            if (prefs.getString(PREF_MOBILE, null) != null) User(
+                uid = prefs.getString(PREF_UID, "") ?: "",
+                name = prefs.getString(PREF_NAME_KEY, "") ?: "",
+                mobile = prefs.getString(PREF_MOBILE, "") ?: "",
+                avatarUrl = prefs.getString(PREF_AVATAR, "") ?: ""
+            ) else null
+        )
+    }
+    var isDarkMode by remember { mutableStateOf(true) }
 
-    MaterialTheme(
-        colorScheme = if (isLightMode) lightColorScheme() else darkColorScheme()
-    ) {
-        if (!isLoggedIn || currentUserMobile.isEmpty()) {
-            PhoneAuthScreen(
-                onLoginSuccess = { mobile ->
+    MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme(
+        primary = RasGramTheme.Green,
+        secondary = RasGramTheme.GreenDark,
+        background = RasGramTheme.DarkBackground,
+        surface = RasGramTheme.DarkPanel,
+        onBackground = RasGramTheme.TextPrimary,
+        onSurface = RasGramTheme.TextPrimary
+    ) else lightColorScheme(
+        primary = RasGramTheme.Green,
+        secondary = RasGramTheme.GreenDark
+    )) {
+        if (!isLoggedIn || currentUser == null) {
+            OtpLoginScreen(
+                onLogin = { user ->
                     prefs.edit()
-                        .putBoolean(PREF_IS_LOGGED_IN, true)
-                        .putString(PREF_MOBILE, mobile)
+                        .putString(PREF_MOBILE, user.mobile)
+                        .putString(PREF_NAME_KEY, user.name)
+                        .putString(PREF_UID, user.uid)
+                        .putString(PREF_AVATAR, user.avatarUrl)
                         .apply()
-                    currentUserMobile = mobile
+                    currentUser = user
                     isLoggedIn = true
                 }
             )
         } else {
-            // Update Online Status periodically
-            LaunchedEffect(currentUserMobile) {
-                while (true) {
-                    db.collection("chat_users").document(currentUserMobile)
-                        .update("lastActive", System.currentTimeMillis(), "isOnline", true)
-                    delay(30_000)
-                }
-            }
-
-            MainHomeScreen(
-                currentUserMobile = currentUserMobile,
-                isLightMode = isLightMode,
-                onToggleTheme = { isLightMode = !isLightMode },
+            MainScreen(
+                currentUser = currentUser!!,
+                isDarkMode = isDarkMode,
+                onToggleTheme = { isDarkMode = !isDarkMode },
                 onLogout = {
                     prefs.edit().clear().apply()
                     FirebaseAuth.getInstance().signOut()
                     isLoggedIn = false
+                    currentUser = null
+                },
+                onUserUpdate = { updated ->
+                    currentUser = updated
+                    prefs.edit()
+                        .putString(PREF_NAME_KEY, updated.name)
+                        .putString(PREF_AVATAR, updated.avatarUrl)
+                        .apply()
                 }
             )
         }
     }
 }
 
-// ==================== OTP & PHONE AUTH SCREEN ====================
+// ==================== OTP LOGIN SCREEN ====================
 @Composable
-fun PhoneAuthScreen(onLoginSuccess: (String) -> Unit) {
-    var phoneNumber by remember { mutableStateOf("") }
-    var otpCode by remember { mutableStateOf("") }
-    var verificationId by remember { mutableStateOf("") }
-    var isOtpSent by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-    
+fun OtpLoginScreen(onLogin: (User) -> Unit) {
     val context = LocalContext.current
-    val activity = context as Activity
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
     val scope = rememberCoroutineScope()
 
-    val callbacks = remember {
-        object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+    var step by remember { mutableStateOf(0) } // 0=phone, 1=name, 2=otp
+    var phoneNumber by remember { mutableStateOf("") }
+    var countryCode by remember { mutableStateOf("+880") }
+    var userName by remember { mutableStateOf("") }
+    var otpCode by remember { mutableStateOf("") }
+    var verificationId by remember { mutableStateOf("") }
+    var resendToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf("") }
+    var countdown by remember { mutableIntStateOf(60) }
+    var canResend by remember { mutableStateOf(false) }
+
+    LaunchedEffect(step) {
+        if (step == 2) {
+            countdown = 60
+            canResend = false
+            while (countdown > 0) {
+                delay(1000)
+                countdown--
+            }
+            canResend = true
+        }
+    }
+
+    fun sendOtp(forceResend: Boolean = false) {
+        val fullPhone = "$countryCode$phoneNumber"
+        if (phoneNumber.length < 9) {
+            errorMsg = "Enter a valid phone number"
+            return
+        }
+        isLoading = true
+        errorMsg = ""
+
+        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                signInWithPhoneAuthCredential(auth, credential, phoneNumber, db, scope, onLoginSuccess)
+                scope.launch {
+                    try {
+                        val result = auth.signInWithCredential(credential).await()
+                        val uid = result.user?.uid ?: return@launch
+                        val mobile = fullPhone.replace("+", "").replace(" ", "")
+                        val docRef = db.collection("chat_users").document(mobile)
+                        val snap = docRef.get().await()
+                        if (!snap.exists()) {
+                            docRef.set(hashMapOf(
+                                "uid" to uid, "name" to userName, "mobile" to mobile,
+                                "avatarUrl" to "", "lastActive" to System.currentTimeMillis(),
+                                "typingTo" to null, "statusVisible" to true,
+                                "about" to "Hey there! I am using RasGram."
+                            )).await()
+                        } else {
+                            docRef.update("lastActive", System.currentTimeMillis(), "uid", uid)
+                        }
+                        val savedName = snap.getString("name") ?: userName
+                        onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
+                    } catch (e: Exception) {
+                        errorMsg = "Auto-verification failed: ${e.message}"
+                        isLoading = false
+                    }
+                }
             }
+
             override fun onVerificationFailed(e: FirebaseException) {
+                errorMsg = "Verification failed: ${e.message}"
                 isLoading = false
-                Toast.makeText(context, "Verification Failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
-            override fun onCodeSent(verId: String, token: PhoneAuthProvider.ForceResendingToken) {
+
+            override fun onCodeSent(vId: String, token: PhoneAuthProvider.ForceResendingToken) {
+                verificationId = vId
+                resendToken = token
                 isLoading = false
-                isOtpSent = true
-                verificationId = verId
-                Toast.makeText(context, "OTP Sent to $phoneNumber", Toast.LENGTH_SHORT).show()
+                step = 2
+            }
+        }
+
+        val optionsBuilder = PhoneAuthOptions.newBuilder(auth)
+            .setPhoneNumber(fullPhone)
+            .setTimeout(60L, TimeUnit.SECONDS)
+            .setActivity(context as ComponentActivity)
+            .setCallbacks(callbacks)
+
+        if (forceResend && resendToken != null) {
+            optionsBuilder.setForceResendingToken(resendToken!!)
+        }
+
+        PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
+    }
+
+    fun verifyOtp() {
+        if (otpCode.length != 6) {
+            errorMsg = "Enter 6-digit OTP"
+            return
+        }
+        isLoading = true
+        errorMsg = ""
+        val fullPhone = "$countryCode$phoneNumber"
+        scope.launch {
+            try {
+                val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
+                val result = auth.signInWithCredential(credential).await()
+                val uid = result.user?.uid ?: throw Exception("No UID")
+                val mobile = fullPhone.replace("+", "").replace(" ", "")
+                val docRef = db.collection("chat_users").document(mobile)
+                val snap = docRef.get().await()
+                if (!snap.exists()) {
+                    docRef.set(hashMapOf(
+                        "uid" to uid, "name" to userName, "mobile" to mobile,
+                        "avatarUrl" to "", "lastActive" to System.currentTimeMillis(),
+                        "typingTo" to null, "statusVisible" to true,
+                        "about" to "Hey there! I am using RasGram."
+                    )).await()
+                } else {
+                    docRef.update("lastActive", System.currentTimeMillis(), "uid", uid)
+                }
+                val savedName = snap.getString("name") ?: userName
+                onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
+            } catch (e: Exception) {
+                errorMsg = "Invalid OTP. Please try again."
+                isLoading = false
             }
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = RasGramTheme.DarkBackground
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.DarkBackground) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Surface(
-                modifier = Modifier.size(90.dp),
-                shape = CircleShape,
-                color = RasGramTheme.Green.copy(alpha = 0.15f)
+            Spacer(modifier = Modifier.height(60.dp))
+
+            // Logo + Header
+            Box(
+                modifier = Modifier
+                    .size(110.dp)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(RasGramTheme.Green.copy(alpha = 0.3f), Color.Transparent)
+                        ),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Logo",
-                    tint = RasGramTheme.Green,
-                    modifier = Modifier.padding(22.dp)
-                )
+                Surface(modifier = Modifier.size(88.dp), shape = CircleShape, color = RasGramTheme.GreenDark) {
+                    Icon(Icons.Default.Send, contentDescription = "Logo", tint = Color.White, modifier = Modifier.padding(22.dp))
+                }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+
+            Spacer(modifier = Modifier.height(28.dp))
+
             Text(
-                "Verify your phone number",
-                style = MaterialTheme.typography.headlineSmall,
+                "RasGram",
+                style = MaterialTheme.typography.headlineLarge,
                 color = RasGramTheme.TextPrimary,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 34.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
-                "RasGram will send an SMS message to verify your phone number.",
-                style = MaterialTheme.typography.bodyMedium,
+                when (step) {
+                    0 -> "Enter your phone number"
+                    1 -> "What's your name?"
+                    else -> "Enter verification code"
+                },
+                style = MaterialTheme.typography.bodyLarge,
                 color = RasGramTheme.TextMuted,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(32.dp))
 
-            if (!isOtpSent) {
-                OutlinedTextField(
-                    value = phoneNumber,
-                    onValueChange = { phoneNumber = it },
-                    label = { Text("Phone Number (with country code e.g. +880)", color = RasGramTheme.TextMuted) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    colors = outlinedFieldColors()
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        if (phoneNumber.isNotBlank() && phoneNumber.startsWith("+")) {
-                            isLoading = true
-                            val options = PhoneAuthOptions.newBuilder(auth)
-                                .setPhoneNumber(phoneNumber)
-                                .setTimeout(60L, TimeUnit.SECONDS)
-                                .setActivity(activity)
-                                .setCallbacks(callbacks)
-                                .build()
-                            PhoneAuthProvider.verifyPhoneNumber(options)
-                        } else {
-                            Toast.makeText(context, "Enter valid number with country code", Toast.LENGTH_SHORT).show()
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = RasGramTheme.DarkPanel),
+                elevation = CardDefaults.cardElevation(8.dp)
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    AnimatedContent(targetState = step, label = "step") { currentStep ->
+                        when (currentStep) {
+                            0 -> PhoneInputStep(
+                                phoneNumber = phoneNumber,
+                                countryCode = countryCode,
+                                onPhoneChange = { phoneNumber = it },
+                                onCountryCodeChange = { countryCode = it },
+                                isLoading = isLoading,
+                                errorMsg = errorMsg,
+                                onNext = {
+                                    if (phoneNumber.isNotBlank()) step = 1 else errorMsg = "Enter phone number"
+                                }
+                            )
+                            1 -> NameInputStep(
+                                userName = userName,
+                                onNameChange = { userName = it },
+                                isLoading = isLoading,
+                                errorMsg = errorMsg,
+                                onNext = {
+                                    if (userName.isNotBlank()) sendOtp() else errorMsg = "Enter your name"
+                                },
+                                onBack = { step = 0 }
+                            )
+                            2 -> OtpInputStep(
+                                otpCode = otpCode,
+                                phoneNumber = "$countryCode$phoneNumber",
+                                onOtpChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) otpCode = it },
+                                isLoading = isLoading,
+                                errorMsg = errorMsg,
+                                countdown = countdown,
+                                canResend = canResend,
+                                onVerify = { verifyOtp() },
+                                onResend = { sendOtp(forceResend = true) },
+                                onBack = { step = 1; otpCode = "" }
+                            )
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
-                    enabled = !isLoading
-                ) {
-                    if (isLoading) CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
-                    else Text("Send OTP", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
                 }
-            } else {
-                OutlinedTextField(
-                    value = otpCode,
-                    onValueChange = { otpCode = it },
-                    label = { Text("Enter 6-digit OTP", color = RasGramTheme.TextMuted) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = outlinedFieldColors()
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        if (otpCode.length == 6) {
-                            isLoading = true
-                            val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
-                            signInWithPhoneAuthCredential(auth, credential, phoneNumber, db, scope, onLoginSuccess)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
-                    enabled = !isLoading
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = RasGramTheme.Green)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("End-to-end encrypted", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+            }
+        }
+    }
+}
+
+@Composable
+fun PhoneInputStep(
+    phoneNumber: String,
+    countryCode: String,
+    onPhoneChange: (String) -> Unit,
+    onCountryCodeChange: (String) -> Unit,
+    isLoading: Boolean,
+    errorMsg: String,
+    onNext: () -> Unit
+) {
+    val countryCodes = listOf("+880" to "🇧🇩 BD", "+1" to "🇺🇸 US", "+44" to "🇬🇧 UK", "+91" to "🇮🇳 IN", "+971" to "🇦🇪 AE", "+966" to "🇸🇦 SA")
+    var showDropdown by remember { mutableStateOf(false) }
+    var selectedCountry by remember { mutableStateOf(countryCodes[0]) }
+
+    Column {
+        Text("Phone Number", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                OutlinedButton(
+                    onClick = { showDropdown = true },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RasGramTheme.TextPrimary),
+                    border = BorderStroke(1.dp, RasGramTheme.Border),
+                    modifier = Modifier.height(56.dp)
                 ) {
-                    if (isLoading) CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
-                    else Text("Verify OTP", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text(selectedCountry.second.take(2), fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(selectedCountry.first, color = RasGramTheme.TextPrimary, fontSize = 14.sp)
+                    Icon(Icons.Default.ArrowDropDown, null, tint = RasGramTheme.TextMuted)
+                }
+                DropdownMenu(
+                    expanded = showDropdown,
+                    onDismissRequest = { showDropdown = false },
+                    modifier = Modifier.background(RasGramTheme.DarkPanel)
+                ) {
+                    countryCodes.forEach { (code, label) ->
+                        DropdownMenuItem(
+                            text = { Text("$label  $code", color = RasGramTheme.TextPrimary) },
+                            onClick = {
+                                selectedCountry = code to label
+                                onCountryCodeChange(code)
+                                showDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = phoneNumber,
+                onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 11) onPhoneChange(it) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Phone number", color = RasGramTheme.TextMuted) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { onNext() }),
+                singleLine = true,
+                colors = outlinedFieldColors(),
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+
+        if (errorMsg.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(errorMsg, color = RasGramTheme.Red, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+            enabled = !isLoading && phoneNumber.isNotBlank()
+        ) {
+            if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+            else Text("Continue", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+fun NameInputStep(
+    userName: String,
+    onNameChange: (String) -> Unit,
+    isLoading: Boolean,
+    errorMsg: String,
+    onNext: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column {
+        Text("Your Name", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = userName,
+            onValueChange = { if (it.length <= 25) onNameChange(it) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Enter your name", color = RasGramTheme.TextMuted) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onNext() }),
+            singleLine = true,
+            colors = outlinedFieldColors(),
+            shape = RoundedCornerShape(12.dp),
+            trailingIcon = {
+                Text("${userName.length}/25", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 8.dp))
+            }
+        )
+        if (errorMsg.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(errorMsg, color = RasGramTheme.Red, style = MaterialTheme.bodySmall)
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = onBack,
+                modifier = Modifier.weight(1f).height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, RasGramTheme.Border),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = RasGramTheme.TextMuted)
+            ) { Text("Back") }
+            Button(
+                onClick = onNext,
+                modifier = Modifier.weight(2f).height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                enabled = !isLoading && userName.isNotBlank()
+            ) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                else Text("Send OTP", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun OtpInputStep(
+    otpCode: String,
+    phoneNumber: String,
+    onOtpChange: (String) -> Unit,
+    isLoading: Boolean,
+    errorMsg: String,
+    countdown: Int,
+    canResend: Boolean,
+    onVerify: () -> Unit,
+    onResend: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "OTP sent to $phoneNumber",
+            style = MaterialTheme.typography.bodySmall,
+            color = RasGramTheme.TextMuted,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // OTP boxes
+        OtpBoxes(otpCode = otpCode, onOtpChange = onOtpChange)
+
+        if (errorMsg.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(errorMsg, color = RasGramTheme.Red, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (canResend) {
+            TextButton(onClick = onResend) {
+                Text("Resend OTP", color = RasGramTheme.Green, fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Text("Resend in ${countdown}s", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = onBack,
+                modifier = Modifier.weight(1f).height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, RasGramTheme.Border),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = RasGramTheme.TextMuted)
+            ) { Text("Back") }
+            Button(
+                onClick = onVerify,
+                modifier = Modifier.weight(2f).height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                enabled = !isLoading && otpCode.length == 6
+            ) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                else Text("Verify", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun OtpBoxes(otpCode: String, onOtpChange: (String) -> Unit) {
+    var focusedIndex by remember { mutableIntStateOf(0) }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        repeat(6) { index ->
+            val char = otpCode.getOrNull(index)?.toString() ?: ""
+            val isFocused = focusedIndex == index || (index == otpCode.length && index < 6)
+            Surface(
+                modifier = Modifier.size(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = if (char.isNotEmpty()) RasGramTheme.Green.copy(alpha = 0.15f) else RasGramTheme.InputBg,
+                border = BorderStroke(if (isFocused) 2.dp else 1.dp, if (isFocused) RasGramTheme.Green else RasGramTheme.Border)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = char,
+                        color = RasGramTheme.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                }
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    // Hidden field for input
+    OutlinedTextField(
+        value = otpCode,
+        onValueChange = onOtpChange,
+        modifier = Modifier.size(1.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.Transparent
+        )
+    )
+}
+
+// ==================== MAIN SCREEN (TABS) ====================
+@Composable
+fun MainScreen(
+    currentUser: User,
+    isDarkMode: Boolean,
+    onToggleTheme: () -> Unit,
+    onLogout: () -> Unit,
+    onUserUpdate: (User) -> Unit
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedContact by remember { mutableStateOf<User?>(null) }
+    var selectedGroup by remember { mutableStateOf<Group?>(null) }
+    var showCallUI by remember { mutableStateOf(false) }
+    var callType by remember { mutableStateOf("audio") }
+    var callContact by remember { mutableStateOf<User?>(null) }
+    var liveCurrentUser by remember { mutableStateOf(currentUser) }
+    val isCompact = isCompactScreen()
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    // Keep user online + sync profile
+    LaunchedEffect(currentUser.mobile) {
+        db.collection("chat_users").document(currentUser.mobile).addSnapshotListener { snap, _ ->
+            snap?.data?.let { d ->
+                liveCurrentUser = liveCurrentUser.copy(
+                    name = d["name"] as? String ?: liveCurrentUser.name,
+                    avatarUrl = d["avatarUrl"] as? String ?: liveCurrentUser.avatarUrl,
+                    about = d["about"] as? String ?: liveCurrentUser.about
+                )
+                onUserUpdate(liveCurrentUser)
+            }
+        }
+        while (true) {
+            db.collection("chat_users").document(currentUser.mobile).update("lastActive", System.currentTimeMillis())
+            delay(30_000)
+        }
+    }
+
+    val inChat = selectedContact != null || selectedGroup != null
+
+    if (isCompact && inChat) {
+        // Full screen chat on mobile
+        if (selectedContact != null) {
+            ChatArea(
+                currentUser = liveCurrentUser,
+                contact = selectedContact!!,
+                onBack = { selectedContact = null },
+                onCallClick = { type ->
+                    callType = type
+                    callContact = selectedContact
+                    showCallUI = true
+                }
+            )
+        }
+    } else {
+        Scaffold(
+            containerColor = RasGramTheme.DarkBackground,
+            bottomBar = {
+                if (isCompact) {
+                    BottomNavBar(
+                        selectedTab = selectedTab,
+                        onTabChange = { selectedTab = it }
+                    )
+                }
+            }
+        ) { padding ->
+            Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // Left sidebar on tablet
+                if (!isCompact) {
+                    Column(modifier = Modifier.width(360.dp).fillMaxHeight()) {
+                        TabLayout(selectedTab = selectedTab, onTabChange = { selectedTab = it })
+                        SidebarContent(
+                            tab = selectedTab,
+                            currentUser = liveCurrentUser,
+                            selectedContact = selectedContact,
+                            onContactSelect = { selectedContact = it; selectedGroup = null },
+                            onGroupSelect = { selectedGroup = it; selectedContact = null },
+                            isDarkMode = isDarkMode,
+                            onToggleTheme = onToggleTheme,
+                            onLogout = onLogout,
+                            onUserUpdate = onUserUpdate
+                        )
+                    }
+                } else {
+                    SidebarContent(
+                        tab = selectedTab,
+                        currentUser = liveCurrentUser,
+                        selectedContact = selectedContact,
+                        onContactSelect = { selectedContact = it },
+                        onGroupSelect = { selectedGroup = it },
+                        isDarkMode = isDarkMode,
+                        onToggleTheme = onToggleTheme,
+                        onLogout = onLogout,
+                        onUserUpdate = onUserUpdate,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // Chat pane on tablet
+                if (!isCompact) {
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        if (selectedContact != null) {
+                            ChatArea(
+                                currentUser = liveCurrentUser,
+                                contact = selectedContact!!,
+                                onBack = { selectedContact = null },
+                                onCallClick = { type ->
+                                    callType = type
+                                    callContact = selectedContact
+                                    showCallUI = true
+                                }
+                            )
+                        } else {
+                            EmptyChatState()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Incoming call overlay
+    if (showCallUI && callContact != null) {
+        CallingScreen(
+            currentUser = liveCurrentUser,
+            contact = callContact!!,
+            callType = callType,
+            onEndCall = { showCallUI = false }
+        )
+    }
+}
+
+@Composable
+fun BottomNavBar(selectedTab: Int, onTabChange: (Int) -> Unit) {
+    NavigationBar(containerColor = RasGramTheme.DarkPanel, tonalElevation = 0.dp) {
+        val tabs = listOf(
+            Triple(Icons.Default.Chat, Icons.Outlined.Chat, "Chats"),
+            Triple(Icons.Default.Circle, Icons.Outlined.Circle, "Status"),
+            Triple(Icons.Default.Call, Icons.Outlined.Call, "Calls"),
+            Triple(Icons.Default.Group, Icons.Outlined.Group, "Groups")
+        )
+        tabs.forEachIndexed { i, (filledIcon, outlinedIcon, label) ->
+            NavigationBarItem(
+                icon = { Icon(if (selectedTab == i) filledIcon else outlinedIcon, label) },
+                label = { Text(label, fontSize = 11.sp) },
+                selected = selectedTab == i,
+                onClick = { onTabChange(i) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = RasGramTheme.Green,
+                    selectedTextColor = RasGramTheme.Green,
+                    unselectedIconColor = RasGramTheme.TextMuted,
+                    unselectedTextColor = RasGramTheme.TextMuted,
+                    indicatorColor = RasGramTheme.Green.copy(alpha = 0.1f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun TabLayout(selectedTab: Int, onTabChange: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val tabs = listOf("Chats", "Status", "Calls")
+        tabs.forEachIndexed { i, label ->
+            Column(
+                modifier = Modifier.weight(1f).clickable { onTabChange(i) }.padding(vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    label,
+                    color = if (selectedTab == i) RasGramTheme.Green else RasGramTheme.TextMuted,
+                    fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 13.sp
+                )
+                if (selectedTab == i) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Box(modifier = Modifier.width(40.dp).height(2.dp).background(RasGramTheme.Green, RoundedCornerShape(1.dp)))
                 }
             }
         }
     }
 }
 
-fun signInWithPhoneAuthCredential(
-    auth: FirebaseAuth,
-    credential: PhoneAuthCredential,
-    mobile: String,
-    db: FirebaseFirestore,
-    scope: kotlinx.coroutines.CoroutineScope,
-    onSuccess: (String) -> Unit
+@Composable
+fun SidebarContent(
+    tab: Int,
+    currentUser: User,
+    selectedContact: User?,
+    onContactSelect: (User) -> Unit,
+    onGroupSelect: (Group) -> Unit,
+    isDarkMode: Boolean,
+    onToggleTheme: () -> Unit,
+    onLogout: () -> Unit,
+    onUserUpdate: (User) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    auth.signInWithCredential(credential)
-        .addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                scope.launch {
-                    val formattedMobile = mobile.replace("+", "")
-                    val userRef = db.collection("chat_users").document(formattedMobile)
-                    val snap = userRef.get().await()
-                    if (!snap.exists()) {
-                        val newUser = User(
-                            id = formattedMobile,
-                            mobile = formattedMobile,
-                            name = "User_$formattedMobile",
-                            lastActive = System.currentTimeMillis(),
-                            isOnline = true
-                        )
-                        userRef.set(newUser).await()
-                    }
-                    onSuccess(formattedMobile)
-                }
-            }
-        }
+    when (tab) {
+        0 -> ChatsTab(
+            currentUser = currentUser,
+            selectedContact = selectedContact,
+            onContactSelect = onContactSelect,
+            isDarkMode = isDarkMode,
+            onToggleTheme = onToggleTheme,
+            onLogout = onLogout,
+            onUserUpdate = onUserUpdate,
+            modifier = modifier
+        )
+        1 -> StatusTab(currentUser = currentUser, modifier = modifier)
+        2 -> CallsTab(currentUser = currentUser, modifier = modifier)
+        3 -> GroupsTab(currentUser = currentUser, onGroupSelect = onGroupSelect, modifier = modifier)
+    }
 }
 
-// ==================== FLOW REPOSITORIES (SUPER FAST SYNC) ====================
-fun getUserStream(db: FirebaseFirestore, mobile: String): Flow<User?> = callbackFlow {
-    val listener = db.collection("chat_users").document(mobile)
-        .addSnapshotListener { snap, _ ->
-            snap?.toObject(User::class.java)?.let { trySend(it) }
-        }
-    awaitClose { listener.remove() }
-}
-
-fun getAllUsersStream(db: FirebaseFirestore): Flow<List<User>> = callbackFlow {
-    val listener = db.collection("chat_users")
-        .addSnapshotListener { snap, _ ->
-            val users = snap?.documents?.mapNotNull { it.toObject(User::class.java) } ?: emptyList()
-            trySend(users)
-        }
-    awaitClose { listener.remove() }
-}
-
-fun getChatMessagesStream(db: FirebaseFirestore, chatId: String): Flow<List<Message>> = callbackFlow {
-    val listener = db.collection("chats").document(chatId).collection("messages")
-        .orderBy("timestamp", Query.Direction.ASCENDING)
-        .addSnapshotListener { snap, _ ->
-            if (snap != null) {
-                val msgs = snap.documents.mapNotNull { doc ->
-                    doc.toObject(Message::class.java)?.copy(id = doc.id, isPending = doc.metadata.hasPendingWrites())
-                }
-                trySend(msgs)
-            }
-        }
-    awaitClose { listener.remove() }
-}
-
-// ==================== MAIN HOME SCREEN ====================
+// ==================== CHATS TAB ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainHomeScreen(
-    currentUserMobile: String,
-    isLightMode: Boolean,
+fun ChatsTab(
+    currentUser: User,
+    selectedContact: User?,
+    onContactSelect: (User) -> Unit,
+    isDarkMode: Boolean,
+    onToggleTheme: () -> Unit,
+    onLogout: () -> Unit,
+    onUserUpdate: (User) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var users by remember { mutableStateOf<List<User>>(emptyList()) }
+    var latestMessages by remember { mutableStateOf<Map<String, Message>>(emptyMap()) }
+    var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showSettings by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
+    var showNewGroup by remember { mutableStateOf(false) }
+    var showAddContact by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Real-time users
+    LaunchedEffect(Unit) {
+        db.collection("chat_users").addSnapshotListener { snapshot, _ ->
+            snapshot?.documents?.mapNotNull { doc ->
+                doc.data?.let { d ->
+                    User(
+                        uid = d["uid"] as? String ?: "",
+                        name = d["name"] as? String ?: "",
+                        mobile = doc.id,
+                        avatarUrl = d["avatarUrl"] as? String ?: "",
+                        lastActive = d["lastActive"] as? Long ?: 0,
+                        typingTo = d["typingTo"] as? String,
+                        statusVisible = d["statusVisible"] as? Boolean ?: true,
+                        about = d["about"] as? String ?: ""
+                    )
+                }
+            }?.filter { it.mobile != currentUser.mobile }?.also { users = it }
+        }
+    }
+
+    // Fast batch latest messages
+    LaunchedEffect(users) {
+        users.forEach { user ->
+            val chatId = generateChatId(currentUser.mobile, user.mobile)
+            db.collection("pvt_msg_$chatId")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(1)
+                .addSnapshotListener { snap, _ ->
+                    snap?.documents?.firstOrNull()?.let { doc ->
+                        doc.data?.let { d ->
+                            val msg = Message(
+                                id = doc.id,
+                                text = d["text"] as? String ?: "",
+                                senderMobile = d["senderMobile"] as? String ?: "",
+                                timestamp = d["timestamp"] as? Long ?: 0,
+                                timeString = d["timeString"] as? String ?: "",
+                                fileUrl = d["fileUrl"] as? String,
+                                fileType = d["fileType"] as? String,
+                                read = d["read"] as? Boolean ?: false,
+                                isCallLog = d["isCallLog"] as? Boolean ?: false,
+                                isDeleted = d["isDeleted"] as? Boolean ?: false
+                            )
+                            latestMessages = latestMessages + (user.mobile to msg)
+                        }
+                    }
+
+                    // Unread count
+                    db.collection("pvt_msg_$chatId")
+                        .whereEqualTo("senderMobile", user.mobile)
+                        .whereEqualTo("read", false)
+                        .get().addOnSuccessListener { qs ->
+                            unreadCounts = unreadCounts + (user.mobile to qs.size())
+                        }
+                }
+        }
+    }
+
+    val filteredUsers = users.filter {
+        it.name.contains(searchQuery, ignoreCase = true) || it.mobile.contains(searchQuery)
+    }.sortedWith(compareByDescending<User> { latestMessages[it.mobile]?.timestamp ?: 0L })
+
+    Column(modifier = modifier.fillMaxHeight().background(RasGramTheme.DarkBackground)) {
+        // Header
+        if (showSearch) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                onClose = { searchQuery = ""; showSearch = false }
+            )
+        } else {
+            ChatsHeader(
+                currentUser = currentUser,
+                onSearchClick = { showSearch = true },
+                onSettingsClick = { showSettings = true },
+                onNewGroupClick = { showNewGroup = true },
+                onAddContactClick = { showAddContact = true },
+                onToggleTheme = onToggleTheme,
+                onLogout = onLogout
+            )
+        }
+
+        HorizontalDivider(color = RasGramTheme.DividerColor, thickness = 0.5.dp)
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            if (filteredUsers.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.PersonAdd, null, modifier = Modifier.size(64.dp), tint = RasGramTheme.TextMuted.copy(0.4f))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No contacts yet", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyLarge)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Other users who sign up will appear here.", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            items(filteredUsers, key = { it.mobile }) { user ->
+                ContactItem(
+                    user = user,
+                    latestMessage = latestMessages[user.mobile],
+                    unreadCount = unreadCounts[user.mobile] ?: 0,
+                    isSelected = selectedContact?.mobile == user.mobile,
+                    currentUserMobile = currentUser.mobile,
+                    onClick = { onContactSelect(user) }
+                )
+                HorizontalDivider(color = RasGramTheme.DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 80.dp))
+            }
+        }
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            currentUser = currentUser,
+            onDismiss = { showSettings = false },
+            onSave = { updated ->
+                showSettings = false
+                onUserUpdate(updated)
+            }
+        )
+    }
+    if (showNewGroup) NewGroupDialog(onDismiss = { showNewGroup = false }, currentUser = currentUser)
+}
+
+@Composable
+fun ChatsHeader(
+    currentUser: User,
+    onSearchClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onNewGroupClick: () -> Unit,
+    onAddContactClick: () -> Unit,
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit
 ) {
-    val db = remember { FirebaseFirestore.getInstance() }
-    val currentUser by getUserStream(db, currentUserMobile).collectAsStateWithLifecycle(initialValue = null)
-    var selectedContact by remember { mutableStateOf<User?>(null) }
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var showSettings by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
 
-    val tabs = listOf("Chats", "Status", "Calls")
-    val isCompact = LocalConfiguration.current.screenWidthDp < 600
+    Row(
+        modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(horizontal = 16.dp).height(60.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text("Ras", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.ExtraBold)
+            Text("Gram", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.Green, fontWeight = FontWeight.ExtraBold)
+        }
+        IconButton(onClick = onSearchClick) {
+            Icon(Icons.Default.Search, null, tint = RasGramTheme.TextMuted)
+        }
+        Box {
+            IconButton(onClick = { showMenu = true }) {
+                Icon(Icons.Default.MoreVert, null, tint = RasGramTheme.TextMuted)
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                modifier = Modifier.background(RasGramTheme.DarkPanel)
+            ) {
+                DropdownMenuItem(
+                    text = { Text("New Group", color = RasGramTheme.TextPrimary) },
+                    leadingIcon = { Icon(Icons.Default.Group, null, tint = RasGramTheme.TextMuted) },
+                    onClick = { onNewGroupClick(); showMenu = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Settings", color = RasGramTheme.TextPrimary) },
+                    leadingIcon = { Icon(Icons.Default.Settings, null, tint = RasGramTheme.TextMuted) },
+                    onClick = { onSettingsClick(); showMenu = false }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (true) "Light Mode" else "Dark Mode", color = RasGramTheme.TextPrimary) },
+                    leadingIcon = { Icon(Icons.Default.Brightness6, null, tint = RasGramTheme.TextMuted) },
+                    onClick = { onToggleTheme(); showMenu = false }
+                )
+                HorizontalDivider(color = RasGramTheme.Border)
+                DropdownMenuItem(
+                    text = { Text("Logout", color = RasGramTheme.Red) },
+                    leadingIcon = { Icon(Icons.Default.Logout, null, tint = RasGramTheme.Red) },
+                    onClick = { onLogout(); showMenu = false }
+                )
+            }
+        }
+    }
+}
 
-    Scaffold(
-        topBar = {
-            if (selectedContact == null || !isCompact) {
-                TopAppBar(
-                    title = { Text("RasGram", color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold) },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = RasGramTheme.DarkHeader),
-                    actions = {
-                        IconButton(onClick = { /* Camera */ }) { Icon(Icons.Outlined.CameraAlt, null, tint = RasGramTheme.TextMuted) }
-                        IconButton(onClick = { /* Search */ }) { Icon(Icons.Default.Search, null, tint = RasGramTheme.TextMuted) }
-                        var showMenu by remember { mutableStateOf(false) }
-                        Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, null, tint = RasGramTheme.TextMuted) }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Settings") }, onClick = { showSettings = true; showMenu = false })
-                                DropdownMenuItem(text = { Text("Logout", color = RasGramTheme.Red) }, onClick = onLogout)
+@Composable
+fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onClose) {
+            Icon(Icons.Default.ArrowBack, null, tint = RasGramTheme.TextMuted)
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Search...", color = RasGramTheme.TextMuted) },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                focusedTextColor = RasGramTheme.TextPrimary,
+                unfocusedTextColor = RasGramTheme.TextPrimary,
+                cursorColor = RasGramTheme.Green
+            )
+        )
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQueryChange("") }) {
+                Icon(Icons.Default.Clear, null, tint = RasGramTheme.TextMuted)
+            }
+        }
+    }
+}
+
+// ==================== CONTACT ITEM ====================
+@Composable
+fun ContactItem(
+    user: User,
+    latestMessage: Message?,
+    unreadCount: Int,
+    isSelected: Boolean,
+    currentUserMobile: String,
+    onClick: () -> Unit
+) {
+    val isOnline = user.lastActive > System.currentTimeMillis() - ONLINE_THRESHOLD_MS
+    val isTyping = user.typingTo != null
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        color = when {
+            isSelected -> RasGramTheme.DarkPanel
+            else -> Color.Transparent
+        }
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Avatar + online dot
+            Box(modifier = Modifier.size(52.dp)) {
+                AsyncImage(
+                    model = user.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${user.name.replace(" ", "+")}&background=008069&color=fff&bold=true&size=128" },
+                    contentDescription = "Avatar",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                if (isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .align(Alignment.BottomEnd)
+                            .border(2.dp, RasGramTheme.DarkBackground, CircleShape)
+                            .background(RasGramTheme.OnlineGreen, CircleShape)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        user.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = RasGramTheme.TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        latestMessage?.timeString ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (unreadCount > 0) RasGramTheme.Green else RasGramTheme.TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    if (isTyping) {
+                        Text("typing...", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.Green, fontWeight = FontWeight.Medium)
+                    } else {
+                        // Tick icon for sent messages
+                        if (latestMessage?.senderMobile == currentUserMobile && latestMessage != null) {
+                            Icon(
+                                imageVector = when {
+                                    latestMessage.isPending -> Icons.Default.Schedule
+                                    latestMessage.read -> Icons.Default.DoneAll
+                                    latestMessage.delivered -> Icons.Default.DoneAll
+                                    else -> Icons.Default.Check
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp).padding(end = 2.dp),
+                                tint = when {
+                                    latestMessage.read -> RasGramTheme.BlueTick
+                                    latestMessage.isPending -> RasGramTheme.TextMuted
+                                    else -> RasGramTheme.TextMuted
+                                }
+                            )
+                        }
+                        val previewText = when {
+                            latestMessage?.isDeleted == true -> "🚫 This message was deleted"
+                            latestMessage?.text?.isNotEmpty() == true -> latestMessage.text
+                            latestMessage != null -> getFileTypePreview(latestMessage)
+                            else -> "Tap to start chatting"
+                        }
+                        Text(
+                            previewText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (unreadCount > 0 && latestMessage?.senderMobile != currentUserMobile) RasGramTheme.TextPrimary else RasGramTheme.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (unreadCount > 0 && latestMessage?.senderMobile != currentUserMobile) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(shape = CircleShape, color = RasGramTheme.Green) {
+                                Text(
+                                    if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
-                )
-            }
-        },
-        containerColor = RasGramTheme.DarkBackground
-    ) { padding ->
-        Row(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // Sidebar / Tab Content
-            AnimatedVisibility(visible = selectedContact == null || !isCompact, modifier = Modifier.fillMaxHeight()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(if (isCompact) LocalConfiguration.current.screenWidthDp.dp else 400.dp)
-                        .background(RasGramTheme.DarkBackground)
-                        .rightBorder(1.dp, RasGramTheme.Border)
-                ) {
-                    TabRow(
-                        selectedTabIndex = selectedTab,
-                        containerColor = RasGramTheme.DarkHeader,
-                        contentColor = RasGramTheme.Green,
-                        indicator = { tabPositions ->
-                            TabRowDefaults.SecondaryIndicator(
-                                Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                                color = RasGramTheme.Green
-                            )
-                        }
-                    ) {
-                        tabs.forEachIndexed { index, title ->
-                            Tab(
-                                selected = selectedTab == index,
-                                onClick = { selectedTab = index },
-                                text = { Text(title, fontWeight = FontWeight.Bold, color = if (selectedTab == index) RasGramTheme.Green else RasGramTheme.TextMuted) }
-                            )
-                        }
-                    }
-
-                    when (selectedTab) {
-                        0 -> ChatsListTab(db, currentUserMobile, onContactClick = { selectedContact = it })
-                        1 -> StatusTab()
-                        2 -> CallsTab()
-                    }
                 }
-            }
-
-            // Chat Area
-            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                if (selectedContact != null && currentUser != null) {
-                    ChatArea(
-                        currentUser = currentUser!!,
-                        contact = selectedContact!!,
-                        onBack = { selectedContact = null },
-                        db = db
-                    )
-                } else {
-                    if (!isCompact) EmptyChatState()
-                }
-            }
-        }
-    }
-
-    if (showSettings && currentUser != null) {
-        SettingsDialog(user = currentUser!!, db = db, onDismiss = { showSettings = false })
-    }
-}
-
-// ==================== CHATS LIST TAB ====================
-@Composable
-fun ChatsListTab(db: FirebaseFirestore, currentUserMobile: String, onContactClick: (User) -> Unit) {
-    val users by getAllUsersStream(db).collectAsStateWithLifecycle(initialValue = emptyList())
-    val filteredUsers = users.filter { it.mobile != currentUserMobile }
-
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(filteredUsers, key = { it.mobile }) { user ->
-            ContactItem(user = user, onClick = { onContactClick(user) })
-        }
-    }
-}
-
-@Composable
-fun ContactItem(user: User, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        color = Color.Transparent
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                AsyncImage(
-                    model = user.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${user.name}&background=8696a0&color=fff" },
-                    contentDescription = null,
-                    modifier = Modifier.size(50.dp).clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-                if (user.isOnline) {
-                    Box(
-                        modifier = Modifier.size(12.dp).align(Alignment.BottomEnd)
-                            .border(2.dp, RasGramTheme.DarkBackground, CircleShape)
-                            .background(RasGramTheme.Green, CircleShape)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(user.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(user.about, style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
 }
 
-// ==================== CHAT AREA (SUPER FAST & ROBUST) ====================
+// ==================== CHAT AREA ====================
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatArea(
     currentUser: User,
     contact: User,
     onBack: () -> Unit,
-    db: FirebaseFirestore
+    onCallClick: (String) -> Unit
 ) {
-    val chatId = generateChatId(currentUser.mobile, contact.mobile)
-    val messages by getChatMessagesStream(db, chatId).collectAsStateWithLifecycle(initialValue = emptyList())
-    val liveContact by getUserStream(db, contact.mobile).collectAsStateWithLifecycle(initialValue = contact)
-    
-    var inputText by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val isCompact = isCompactScreen()
+
+    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
+    var inputText by remember { mutableStateOf("") }
+    var liveContact by remember { mutableStateOf(contact) }
     var isUploading by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableFloatStateOf(0f) }
     var replyToMessage by remember { mutableStateOf<Message?>(null) }
-    val focusManager = LocalFocusManager.current
+    var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showAttachMenu by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableIntStateOf(0) }
+    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var recordingFile by remember { mutableStateOf<File?>(null) }
+    val listState = rememberLazyListState()
+    val haptic = LocalHapticFeedback.current
 
-    // Optimized Auto-Scroll
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
+    val chatId = remember(currentUser.mobile, contact.mobile) {
+        generateChatId(currentUser.mobile, contact.mobile)
     }
 
-    // Read Receipt updater
-    LaunchedEffect(messages) {
-        val unreadMsgs = messages.filter { it.senderMobile == contact.mobile && !it.read }
-        if (unreadMsgs.isNotEmpty()) {
-            val batch = db.batch()
-            unreadMsgs.forEach { msg ->
-                val ref = db.collection("chats").document(chatId).collection("messages").document(msg.id)
-                batch.update(ref, "read", true)
-            }
-            batch.commit()
-        }
-    }
-
-    // Modern File Picker (Supports ANY file)
-    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // File launchers
+    val imageVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             isUploading = true
-            scope.launch(Dispatchers.IO) {
-                val (url, fileName, fileType, fileSize) = uploadAnyFileToCloudinary(context, it)
-                if (url != null) {
-                    sendMessage(db, chatId, currentUser.mobile, "", url, fileName, fileType, fileSize, replyToMessage?.id)
-                    withContext(Dispatchers.Main) {
-                        replyToMessage = null
-                        Toast.makeText(context, "File Sent successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    withContext(Dispatchers.Main) { Toast.makeText(context, "Upload Failed", Toast.LENGTH_SHORT).show() }
+            scope.launch {
+                try {
+                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
+                    if (url != null) {
+                        sendMessage(db, chatId, currentUser.mobile, contact.mobile, "", url, fileName, fileType)
+                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
                 isUploading = false
+                uploadProgress = 0f
             }
         }
+    }
+
+    val docLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            isUploading = true
+            scope.launch {
+                try {
+                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
+                    if (url != null) {
+                        sendMessage(db, chatId, currentUser.mobile, contact.mobile, "", url, fileName, fileType)
+                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+                isUploading = false
+                uploadProgress = 0f
+            }
+        }
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
+        if (perms[Manifest.permission.RECORD_AUDIO] == true) {
+            // Start recording
+        }
+    }
+
+    // Load messages with real-time listener
+    LaunchedEffect(chatId) {
+        db.collection("pvt_msg_$chatId")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                snapshot?.let { qs ->
+                    messages = qs.documents.mapNotNull { doc ->
+                        doc.data?.let { d ->
+                            Message(
+                                id = doc.id,
+                                text = d["text"] as? String ?: "",
+                                senderMobile = d["senderMobile"] as? String ?: "",
+                                receiverMobile = d["receiverMobile"] as? String ?: "",
+                                timestamp = d["timestamp"] as? Long ?: 0,
+                                timeString = d["timeString"] as? String ?: "",
+                                fileUrl = d["fileUrl"] as? String,
+                                fileName = d["fileName"] as? String,
+                                fileType = d["fileType"] as? String,
+                                fileSizeBytes = d["fileSizeBytes"] as? Long ?: 0,
+                                reaction = d["reaction"] as? String,
+                                read = d["read"] as? Boolean ?: false,
+                                delivered = d["delivered"] as? Boolean ?: false,
+                                isCallLog = d["isCallLog"] as? Boolean ?: false,
+                                callStatus = d["callStatus"] as? String,
+                                callType = d["callType"] as? String,
+                                isPending = doc.metadata.hasPendingWrites(),
+                                replyToId = d["replyToId"] as? String,
+                                replyToText = d["replyToText"] as? String,
+                                replyToSender = d["replyToSender"] as? String,
+                                isDeleted = d["isDeleted"] as? Boolean ?: false,
+                                isForwarded = d["isForwarded"] as? Boolean ?: false,
+                                isStarred = d["isStarred"] as? Boolean ?: false,
+                                duration = (d["duration"] as? Long)?.toInt() ?: 0
+                            )
+                        }
+                    }
+                    // Mark as read
+                    qs.documents.filter { doc ->
+                        doc.getString("senderMobile") == contact.mobile && doc.getBoolean("read") == false
+                    }.forEach { doc ->
+                        doc.reference.update("read", true, "delivered", true)
+                    }
+                }
+            }
+    }
+
+    // Contact live status
+    LaunchedEffect(contact.mobile) {
+        db.collection("chat_users").document(contact.mobile).addSnapshotListener { snap, _ ->
+            snap?.data?.let { d ->
+                liveContact = liveContact.copy(
+                    name = d["name"] as? String ?: liveContact.name,
+                    avatarUrl = d["avatarUrl"] as? String ?: liveContact.avatarUrl,
+                    typingTo = d["typingTo"] as? String,
+                    lastActive = d["lastActive"] as? Long ?: 0
+                )
+            }
+        }
+    }
+
+    // Auto scroll to bottom
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    }
+
+    // Recording timer
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordingSeconds = 0
+            while (isRecording) { delay(1000); recordingSeconds++ }
+        }
+    }
+
+    var typingJob by remember { mutableStateOf<Job?>(null) }
+
+    fun sendText() {
+        val text = inputText.trim()
+        if (text.isBlank()) return
+        sendMessage(
+            db, chatId, currentUser.mobile, contact.mobile, text, null, null, null,
+            replyToMessage?.id, replyToMessage?.text, replyToMessage?.senderMobile
+        )
+        inputText = ""
+        replyToMessage = null
+        typingJob?.cancel()
+        scope.launch { db.collection("chat_users").document(currentUser.mobile).update("typingTo", null) }
+    }
+
+    BackHandler(enabled = selectedMessages.isNotEmpty()) {
+        selectedMessages = emptySet()
     }
 
     Column(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
-        // Chat Header
-        Surface(color = RasGramTheme.DarkHeader, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Row(modifier = Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (LocalConfiguration.current.screenWidthDp < 600) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RasGramTheme.TextPrimary) }
+        // Header
+        if (selectedMessages.isNotEmpty()) {
+            SelectionHeader(
+                count = selectedMessages.size,
+                onClose = { selectedMessages = emptySet() },
+                onDelete = {
+                    scope.launch {
+                        selectedMessages.forEach { id ->
+                            db.collection("pvt_msg_$chatId").document(id).update("isDeleted", true, "text", "")
+                        }
+                        selectedMessages = emptySet()
+                    }
+                },
+                onForward = { /* Forward logic */ },
+                onStar = {
+                    scope.launch {
+                        selectedMessages.forEach { id ->
+                            db.collection("pvt_msg_$chatId").document(id).update("isStarred", true)
+                        }
+                        selectedMessages = emptySet()
+                    }
+                },
+                onCopy = {
+                    val text = messages.filter { it.id in selectedMessages }.joinToString("\n") { it.text }
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("messages", text))
+                    selectedMessages = emptySet()
                 }
-                AsyncImage(
-                    model = liveContact?.avatarUrl?.ifEmpty { "https://ui-avatars.com/api/?name=${liveContact?.name}" },
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(liveContact?.name ?: "Unknown", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary)
-                    Text(
-                        if (liveContact?.isOnline == true) "online" else "offline",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RasGramTheme.TextMuted
-                    )
-                }
-                IconButton(onClick = { /* Video Call */ }) { Icon(Icons.Default.Videocam, null, tint = RasGramTheme.TextPrimary) }
-                IconButton(onClick = { /* Voice Call */ }) { Icon(Icons.Default.Call, null, tint = RasGramTheme.TextPrimary) }
-            }
+            )
+        } else {
+            ChatHeader(
+                contact = liveContact,
+                currentUserMobile = currentUser.mobile,
+                isCompact = isCompact,
+                onBack = onBack,
+                onCallClick = onCallClick,
+                onClearChat = {
+                    scope.launch {
+                        db.collection("pvt_msg_$chatId").get().await().documents.forEach { it.reference.delete() }
+                    }
+                },
+                onViewContact = { /* View contact */ }
+            )
         }
 
-        // Message List
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            Image(
-                painter = coil3.compose.rememberAsyncImagePainter("https://i.imgur.com/3qC5PQA.jpeg"), // WhatsApp dark wallpaper pattern
-                contentDescription = "Background",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = 0.05f
-            )
+        // Messages area
+        Box(modifier = Modifier.weight(1f)) {
+            // Chat wallpaper pattern (subtle)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // subtle background pattern
+            }
 
             LazyColumn(
-                state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 item {
+                    EncryptionNotice()
+                }
+
+                var lastDateString = ""
+                messages.forEach { message ->
+                    val dateStr = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(Date(message.timestamp))
+                    if (dateStr != lastDateString) {
+                        lastDateString = dateStr
+                        item(key = "date_$dateStr") {
+                            DateDivider(dateStr)
+                        }
+                    }
+                    item(key = message.id) {
+                        MessageBubble(
+                            message = message,
+                            isMe = message.senderMobile == currentUser.mobile,
+                            isSelected = message.id in selectedMessages,
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                selectedMessages = selectedMessages + message.id
+                            },
+                            onClick = {
+                                if (selectedMessages.isNotEmpty()) {
+                                    selectedMessages = if (message.id in selectedMessages)
+                                        selectedMessages - message.id else selectedMessages + message.id
+                                }
+                            },
+                            onReact = { reaction ->
+                                scope.launch {
+                                    db.collection("pvt_msg_$chatId").document(message.id)
+                                        .update("reaction", if (message.reaction == reaction) null else reaction)
+                                }
+                            },
+                            onReply = { replyToMessage = message },
+                            onDelete = {
+                                scope.launch {
+                                    db.collection("pvt_msg_$chatId").document(message.id)
+                                        .update("isDeleted", true, "text", "")
+                                }
+                            },
+                            onStar = {
+                                scope.launch {
+                                    db.collection("pvt_msg_$chatId").document(message.id)
+                                        .update("isStarred", !message.isStarred)
+                                }
+                            },
+                            onCopy = {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("message", message.text))
+                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Scroll to bottom FAB
+            val showScrollFab by remember { derivedStateOf { listState.firstVisibleItemIndex < messages.size - 5 && messages.size > 10 } }
+            AnimatedVisibility(
+                visible = showScrollFab,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut()
+            ) {
+                FloatingActionButton(
+                    onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
+                    modifier = Modifier.size(40.dp),
+                    containerColor = RasGramTheme.DarkPanel,
+                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, null, tint = RasGramTheme.TextMuted)
+                }
+            }
+        }
+
+        // Upload progress
+        if (isUploading) {
+            LinearProgressIndicator(
+                progress = { uploadProgress },
+                modifier = Modifier.fillMaxWidth(),
+                color = RasGramTheme.Green,
+                trackColor = RasGramTheme.DarkPanel
+            )
+        }
+
+        // Reply preview
+        replyToMessage?.let { reply ->
+            ReplyPreview(
+                message = reply,
+                currentUserMobile = currentUser.mobile,
+                onDismiss = { replyToMessage = null }
+            )
+        }
+
+        // Input area
+        ChatInputBar(
+            inputText = inputText,
+            onTextChange = { text ->
+                inputText = text
+                if (text.isNotEmpty()) {
+                    typingJob?.cancel()
+                    typingJob = scope.launch {
+                        db.collection("chat_users").document(currentUser.mobile).update("typingTo", contact.mobile)
+                        delay(TYPING_DEBOUNCE_MS)
+                        db.collection("chat_users").document(currentUser.mobile).update("typingTo", null)
+                    }
+                }
+            },
+            onSend = { sendText() },
+            onAttachClick = { showAttachMenu = true },
+            isRecording = isRecording,
+            recordingSeconds = recordingSeconds,
+            onMicPress = {
+                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                if (!hasPerm) {
+                    permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                    return@ChatInputBar
+                }
+                if (!isRecording) {
+                    try {
+                        val file = File(context.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
+                        recordingFile = file
+                        val recorder = MediaRecorder()
+                        recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+                        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        recorder.setOutputFile(file.absolutePath)
+                        recorder.prepare()
+                        recorder.start()
+                        mediaRecorder = recorder
+                        isRecording = true
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Recording error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onMicRelease = {
+                if (isRecording) {
+                    try {
+                        mediaRecorder?.stop()
+                        mediaRecorder?.release()
+                        mediaRecorder = null
+                        isRecording = false
+                        val file = recordingFile ?: return@ChatInputBar
+                        if (file.exists() && file.length() > 0) {
+                            isUploading = true
+                            scope.launch {
+                                val (url, fileName, _) = uploadToCloudinary(context, file.toUri()) { prog -> uploadProgress = prog }
+                                if (url != null) {
+                                    sendMessage(db, chatId, currentUser.mobile, contact.mobile, "", url, fileName ?: "voice.m4a", "audio/mp4", null, null, null, recordingSeconds)
+                                }
+                                isUploading = false
+                                uploadProgress = 0f
+                                file.delete()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        isRecording = false
+                    }
+                }
+            },
+            onMicCancel = {
+                mediaRecorder?.release()
+                mediaRecorder = null
+                isRecording = false
+                recordingFile?.delete()
+            }
+        )
+    }
+
+    // Attachment menu
+    if (showAttachMenu) {
+        AttachmentMenuSheet(
+            onDismiss = { showAttachMenu = false },
+            onImageVideo = { imageVideoLauncher.launch(arrayOf("image/*", "video/*")); showAttachMenu = false },
+            onDocument = { docLauncher.launch(arrayOf("*/*")); showAttachMenu = false },
+            onAudio = { docLauncher.launch(arrayOf("audio/*")); showAttachMenu = false }
+        )
+    }
+}
+
+@Composable
+fun EncryptionNotice() {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF182229)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Lock, null, modifier = Modifier.size(12.dp), tint = RasGramTheme.Yellow)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                "Messages are end-to-end encrypted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = RasGramTheme.Yellow,
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun DateDivider(dateString: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = RasGramTheme.Border, thickness = 0.5.dp)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF182229),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
+            Text(dateString, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp), color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
+        }
+        HorizontalDivider(modifier = Modifier.weight(1f), color = RasGramTheme.Border, thickness = 0.5.dp)
+    }
+}
+
+@Composable
+fun ChatHeader(
+    contact: User,
+    currentUserMobile: String,
+    isCompact: Boolean,
+    onBack: () -> Unit,
+    onCallClick: (String) -> Unit,
+    onClearChat: () -> Unit,
+    onViewContact: () -> Unit
+) {
+    val isOnline = contact.lastActive > System.currentTimeMillis() - ONLINE_THRESHOLD_MS
+    var showMenu by remember { mutableStateOf(false) }
+
+    Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(60.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isCompact) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, null, tint = RasGramTheme.TextPrimary)
+                }
+            }
+
+            Row(
+                modifier = Modifier.weight(1f).clickable { onViewContact() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.size(40.dp)) {
+                    AsyncImage(
+                        model = contact.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${contact.name.replace(" ", "+")}&background=008069&color=fff&bold=true&size=80" },
+                        contentDescription = "Avatar",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    if (isOnline) {
+                        Box(modifier = Modifier.size(10.dp).align(Alignment.BottomEnd).border(2.dp, RasGramTheme.DarkPanel, CircleShape).background(RasGramTheme.OnlineGreen, CircleShape))
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(contact.name, style = MaterialTheme.typography.bodyLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Messages are end-to-end encrypted.",
-                        color = Color(0xFFFFD279),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                        textAlign = TextAlign.Center
+                        when {
+                            contact.typingTo == currentUserMobile -> "typing..."
+                            isOnline -> "online"
+                            else -> "last seen ${formatLastSeen(System.currentTimeMillis() - contact.lastActive)}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (contact.typingTo == currentUserMobile || isOnline) RasGramTheme.Green else RasGramTheme.TextMuted,
+                        fontSize = 11.sp
                     )
                 }
-                items(messages, key = { it.id }) { message ->
-                    val isMe = message.senderMobile == currentUser.mobile
-                    val repliedMsg = messages.find { it.id == message.replyToMessageId }
-                    
-                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        SwipeToReplyWrapper(
-                            onSwipe = { replyToMessage = message }
-                        ) {
-                            MessageBubbleReal(message, isMe, repliedMsg)
-                        }
-                    }
-                }
             }
-        }
 
-        if (isUploading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.Green)
-        }
-
-        // Reply UI Bar
-        AnimatedVisibility(visible = replyToMessage != null) {
-            Surface(color = RasGramTheme.DarkPanel, modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(RasGramTheme.DarkBackground).padding(8.dp).rightBorder(4.dp, RasGramTheme.Green)) {
-                        Text(if (replyToMessage?.senderMobile == currentUser.mobile) "You" else contact.name, color = RasGramTheme.Green, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(replyToMessage?.text ?: "File", color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
-                    }
-                    IconButton(onClick = { replyToMessage = null }) { Icon(Icons.Default.Close, null, tint = RasGramTheme.TextMuted) }
-                }
+            IconButton(onClick = { onCallClick("video") }) {
+                Icon(Icons.Default.Videocam, null, tint = RasGramTheme.TextMuted)
             }
-        }
-
-        // Input Area
-        Surface(color = RasGramTheme.DarkHeader, modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = { fileLauncher.launch("*/*") }) {
-                    Icon(Icons.Default.AttachFile, null, tint = RasGramTheme.TextMuted)
+            IconButton(onClick = { onCallClick("audio") }) {
+                Icon(Icons.Default.Call, null, tint = RasGramTheme.TextMuted)
+            }
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(Icons.Default.MoreVert, null, tint = RasGramTheme.TextMuted)
                 }
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 150.dp),
-                    placeholder = { Text("Message", color = RasGramTheme.TextMuted) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = RasGramTheme.DarkPanel,
-                        unfocusedContainerColor = RasGramTheme.DarkPanel,
-                        focusedTextColor = RasGramTheme.TextPrimary,
-                        unfocusedTextColor = RasGramTheme.TextPrimary,
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (inputText.isNotBlank()) {
-                            sendMessage(db, chatId, currentUser.mobile, inputText, null, null, null, null, replyToMessage?.id)
-                            inputText = ""
-                            replyToMessage = null
-                        }
-                    })
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                FloatingActionButton(
-                    onClick = {
-                        if (inputText.isNotBlank()) {
-                            sendMessage(db, chatId, currentUser.mobile, inputText, null, null, null, null, replyToMessage?.id)
-                            inputText = ""
-                            replyToMessage = null
-                        }
-                    },
-                    modifier = Modifier.size(48.dp),
-                    containerColor = RasGramTheme.Green,
-                    shape = CircleShape
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                    modifier = Modifier.background(RasGramTheme.DarkPanel)
                 ) {
-                    Icon(if (inputText.isNotBlank()) Icons.AutoMirrored.Filled.Send else Icons.Default.Mic, null, tint = Color.White)
+                    DropdownMenuItem(
+                        text = { Text("View Contact", color = RasGramTheme.TextPrimary) },
+                        leadingIcon = { Icon(Icons.Default.Person, null, tint = RasGramTheme.TextMuted) },
+                        onClick = { onViewContact(); showMenu = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Clear Chat", color = RasGramTheme.Red) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = RasGramTheme.Red) },
+                        onClick = { onClearChat(); showMenu = false }
+                    )
                 }
             }
         }
     }
 }
 
-// ==================== MESSAGE BUBBLE & SWIPE TO REPLY ====================
 @Composable
-fun MessageBubbleReal(message: Message, isMe: Boolean, repliedMsg: Message?) {
-    val alignment = if (isMe) Alignment.End else Alignment.Start
-    val bubbleColor = if (isMe) RasGramTheme.BubbleOut else RasGramTheme.BubbleIn
-    val context = LocalContext.current
-
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 12.dp, topEnd = 12.dp,
-                bottomStart = if (isMe) 12.dp else 0.dp,
-                bottomEnd = if (isMe) 0.dp else 12.dp
-            ),
-            color = bubbleColor,
-            modifier = Modifier.widthIn(max = 300.dp),
-            shadowElevation = 1.dp
+fun SelectionHeader(
+    count: Int,
+    onClose: () -> Unit,
+    onDelete: () -> Unit,
+    onForward: () -> Unit,
+    onStar: () -> Unit,
+    onCopy: () -> Unit
+) {
+    Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(60.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 6.dp)) {
-                // Render Reply Snippet
-                if (repliedMsg != null) {
-                    Surface(
-                        color = if (isMe) RasGramTheme.BubbleReplyOut else RasGramTheme.BubbleReplyIn,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, null, tint = RasGramTheme.TextPrimary)
+            }
+            Text("$count selected", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, modifier = Modifier.weight(1f))
+            IconButton(onClick = onStar) { Icon(Icons.Default.Star, null, tint = RasGramTheme.Yellow) }
+            IconButton(onClick = onCopy) { Icon(Icons.Default.ContentCopy, null, tint = RasGramTheme.TextMuted) }
+            IconButton(onClick = onForward) { Icon(Icons.Default.Forward, null, tint = RasGramTheme.TextMuted) }
+            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null, tint = RasGramTheme.Red) }
+        }
+    }
+}
+
+@Composable
+fun ReplyPreview(message: Message, currentUserMobile: String, onDismiss: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = RasGramTheme.DarkPanel
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.width(3.dp).height(36.dp).background(RasGramTheme.Green, RoundedCornerShape(2.dp)))
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (message.senderMobile == currentUserMobile) "You" else "Contact",
+                    color = RasGramTheme.Green,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (message.isDeleted) "This message was deleted" else if (message.text.isNotEmpty()) message.text else getFileTypePreview(message),
+                    color = RasGramTheme.TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Close, null, tint = RasGramTheme.TextMuted)
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatInputBar(
+    inputText: String,
+    onTextChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onAttachClick: () -> Unit,
+    isRecording: Boolean,
+    recordingSeconds: Int,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
+    onMicCancel: () -> Unit
+) {
+    Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkBackground) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            if (isRecording) {
+                // Recording UI
+                Surface(
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = RasGramTheme.InputBg
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(8.dp).drawBehind {
-                            drawLine(RasGramTheme.Green, Offset(0f, 0f), Offset(0f, size.height), 8f)
-                        }) {
-                            Text(if (repliedMsg.senderMobile == message.senderMobile) "You" else "Contact", color = RasGramTheme.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text(repliedMsg.text.ifEmpty { "File Attached" }, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                        RecordingWaveAnimation()
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            formatTime(recordingSeconds),
+                            color = RasGramTheme.Red,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("< Slide to cancel", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                FloatingActionButton(
+                    onClick = onMicRelease,
+                    modifier = Modifier.size(48.dp),
+                    containerColor = RasGramTheme.Green,
+                    elevation = FloatingActionButtonDefaults.elevation(2.dp)
+                ) {
+                    Icon(Icons.Default.Send, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+            } else {
+                // Emoji + Attach
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(24.dp),
+                    color = RasGramTheme.InputBg
+                ) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        IconButton(onClick = { /* emoji picker */ }) {
+                            Icon(Icons.Default.EmojiEmotions, null, tint = RasGramTheme.TextMuted)
+                        }
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = onTextChange,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 140.dp),
+                            placeholder = { Text("Message", color = RasGramTheme.TextMuted) },
+                            maxLines = 6,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedTextColor = RasGramTheme.TextPrimary,
+                                unfocusedTextColor = RasGramTheme.TextPrimary,
+                                cursorColor = RasGramTheme.Green
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { onSend() })
+                        )
+                        IconButton(onClick = onAttachClick) {
+                            Icon(Icons.Default.AttachFile, null, tint = RasGramTheme.TextMuted)
                         }
                     }
                 }
 
-                // Render File
-                if (message.fileUrl != null) {
-                    when {
-                        message.fileType?.startsWith("image/") == true -> {
-                            AsyncImage(
-                                model = message.fileUrl,
-                                contentDescription = "Image",
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 250.dp).clip(RoundedCornerShape(8.dp)).clickable {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, message.fileUrl.toUri()))
-                                },
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                        else -> {
-                            // Any other document file
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.2f)).clickable {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, message.fileUrl.toUri()))
-                                }.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.InsertDriveFile, null, tint = RasGramTheme.TextMuted, modifier = Modifier.size(32.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(message.fileName ?: "Document", color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
-                                    Text(message.fileSize ?: "Unknown size", color = RasGramTheme.TextMuted, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
+                Spacer(modifier = Modifier.width(8.dp))
 
-                // Render Text
-                if (message.text.isNotEmpty()) {
-                    Text(message.text, color = RasGramTheme.TextPrimary, fontSize = 16.sp)
-                }
-
-                // Render Time & Read Receipt
-                Row(modifier = Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                    Text(message.timeString, fontSize = 11.sp, color = RasGramTheme.TextMuted)
-                    if (isMe) {
-                        Spacer(modifier = Modifier.width(4.dp))
+                AnimatedContent(
+                    targetState = inputText.isNotEmpty(),
+                    transitionSpec = { (scaleIn() + fadeIn()).togetherWith(scaleOut() + fadeOut()) },
+                    label = "SendMicButton"
+                ) { hasText ->
+                    FloatingActionButton(
+                        onClick = if (hasText) onSend else onMicPress,
+                        modifier = Modifier.size(48.dp),
+                        containerColor = RasGramTheme.Green,
+                        elevation = FloatingActionButtonDefaults.elevation(2.dp)
+                    ) {
                         Icon(
-                            imageVector = when {
-                                message.isPending -> Icons.Default.Schedule
-                                message.read -> Icons.Default.DoneAll
-                                else -> Icons.Default.Check
-                            },
-                            contentDescription = "Status",
-                            modifier = Modifier.size(14.dp),
-                            tint = if (message.read && !message.isPending) RasGramTheme.BlueTick else RasGramTheme.TextMuted
+                            if (hasText) Icons.Default.Send else Icons.Default.Mic,
+                            null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
@@ -866,146 +2059,1470 @@ fun MessageBubbleReal(message: Message, isMe: Boolean, repliedMsg: Message?) {
 }
 
 @Composable
-fun SwipeToReplyWrapper(onSwipe: () -> Unit, content: @Composable () -> Unit) {
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    Box(
-        modifier = Modifier.fillMaxWidth().offset(x = offsetX.dp).pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragEnd = {
-                    if (offsetX > 60f) onSwipe()
-                    offsetX = 0f
-                },
-                onHorizontalDrag = { change, dragAmount ->
-                    change.consume()
-                    if (dragAmount > 0 && offsetX < 80f) { offsetX += dragAmount * 0.5f }
-                }
+fun RecordingWaveAnimation() {
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
+    val bars = remember { (1..5).map { it } }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Box(modifier = Modifier.size(8.dp).background(RasGramTheme.Red, CircleShape))
+        Spacer(modifier = Modifier.width(4.dp))
+        bars.forEachIndexed { i, _ ->
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(400, delayMillis = i * 80),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "bar$i"
             )
+            Box(modifier = Modifier.width(3.dp).height((16 * scale).dp).background(RasGramTheme.Green, RoundedCornerShape(2.dp)))
         }
-    ) {
-        content()
     }
 }
 
-// ==================== UNIVERSAL FILE UPLOADER ====================
-// Supports PDF, DOCX, APK, Images, Audio, ZIP up to 10MB natively via Cloudinary generic endpoint.
-suspend fun uploadAnyFileToCloudinary(context: Context, uri: Uri): FileUploadResult = withContext(Dispatchers.IO) {
+@Composable
+fun AttachmentMenuSheet(
+    onDismiss: () -> Unit,
+    onImageVideo: () -> Unit,
+    onDocument: () -> Unit,
+    onAudio: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = RasGramTheme.DarkPanel
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text("Share", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(20.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    AttachOption(Icons.Default.Image, "Photos & Videos", RasGramTheme.Orange, onImageVideo)
+                    AttachOption(Icons.Default.InsertDriveFile, "Document", Color(0xFF6C63FF), onDocument)
+                    AttachOption(Icons.Default.AudioFile, "Audio", Color(0xFF00BFA5), onAudio)
+                    AttachOption(Icons.Default.Camera, "Camera", RasGramTheme.Green, onDismiss)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    AttachOption(Icons.Default.LocationOn, "Location", RasGramTheme.Red, onDismiss)
+                    AttachOption(Icons.Default.ContactPage, "Contact", Color(0xFF2196F3), onDismiss)
+                    AttachOption(Icons.Default.Poll, "Poll", Color(0xFFFF9800), onDismiss)
+                    AttachOption(Icons.Default.Gif, "GIF", Color(0xFF9C27B0), onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AttachOption(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick).padding(8.dp)
+    ) {
+        Surface(shape = CircleShape, color = color.copy(alpha = 0.15f), modifier = Modifier.size(56.dp)) {
+            Icon(icon, null, tint = color, modifier = Modifier.padding(14.dp))
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(label, color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+    }
+}
+
+// ==================== MESSAGE BUBBLE ====================
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MessageBubble(
+    message: Message,
+    isMe: Boolean,
+    isSelected: Boolean,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+    onReact: (String) -> Unit,
+    onReply: () -> Unit,
+    onDelete: () -> Unit,
+    onStar: () -> Unit,
+    onCopy: () -> Unit
+) {
+    val context = LocalContext.current
+    val bubbleColor = if (isMe) RasGramTheme.BubbleOut else RasGramTheme.BubbleIn
+    val alignment = if (isMe) Alignment.End else Alignment.Start
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    val selectionBg = if (isSelected) RasGramTheme.Green.copy(alpha = 0.15f) else Color.Transparent
+
+    Column(
+        modifier = Modifier.fillMaxWidth().background(selectionBg).padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalAlignment = alignment
+    ) {
+        if (message.isCallLog) {
+            CallLogBubble(message = message)
+            return@Column
+        }
+
+        if (message.isDeleted) {
+            DeletedMessageBubble(isMe = isMe, timeString = message.timeString)
+            return@Column
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (!isMe) { Spacer(modifier = Modifier.width(4.dp)) }
+
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .combinedClickable(onClick = onClick, onLongClick = { showContextMenu = true; onLongClick() }),
+                shape = RoundedCornerShape(
+                    topStart = 16.dp, topEnd = 16.dp,
+                    bottomStart = if (isMe) 16.dp else 4.dp,
+                    bottomEnd = if (isMe) 4.dp else 16.dp
+                ),
+                color = bubbleColor,
+                shadowElevation = 1.dp
+            ) {
+                Column(modifier = Modifier.padding(0.dp)) {
+                    // Reply preview inside bubble
+                    message.replyToId?.let {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 0.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Black.copy(alpha = 0.2f)
+                        ) {
+                            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.width(2.dp).height(28.dp).background(RasGramTheme.Green, RoundedCornerShape(1.dp)))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(message.replyToSender ?: "Unknown", color = RasGramTheme.Green, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(message.replyToText ?: "", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+
+                    // Forward badge
+                    if (message.isForwarded) {
+                        Row(modifier = Modifier.padding(start = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Forward, null, modifier = Modifier.size(12.dp), tint = RasGramTheme.TextMuted)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Forwarded", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                        }
+                    }
+
+                    // File content
+                    message.fileUrl?.let { url ->
+                        when {
+                            message.fileType?.startsWith("image/") == true -> ImageMessageContent(url = url, context = context)
+                            message.fileType?.startsWith("video/") == true -> VideoMessageContent(url = url, fileName = message.fileName, fileType = message.fileType, context = context)
+                            message.fileType?.startsWith("audio/") == true -> AudioMessageContent(url = url, fileName = message.fileName, duration = message.duration)
+                            else -> DocumentMessageContent(url = url, fileName = message.fileName, fileType = message.fileType, fileSize = message.fileSizeBytes, context = context)
+                        }
+                    }
+
+                    // Text
+                    if (message.text.isNotEmpty()) {
+                        Text(
+                            message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = RasGramTheme.TextPrimary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = if (message.fileUrl != null) 4.dp else 8.dp)
+                        )
+                    }
+
+                    // Time + ticks row
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(end = 8.dp, bottom = 4.dp, top = if (message.text.isEmpty() && message.fileUrl != null) 4.dp else 0.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (message.isStarred) {
+                            Icon(Icons.Default.Star, null, modifier = Modifier.size(10.dp), tint = RasGramTheme.StarColor)
+                            Spacer(modifier = Modifier.width(2.dp))
+                        }
+                        Text(message.timeString, style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted.copy(0.8f), fontSize = 10.sp)
+                        if (isMe) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = when {
+                                    message.isPending -> Icons.Default.Schedule
+                                    message.read -> Icons.Default.DoneAll
+                                    message.delivered -> Icons.Default.DoneAll
+                                    else -> Icons.Default.Check
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = when {
+                                    message.read -> RasGramTheme.BlueTick
+                                    else -> RasGramTheme.TextMuted
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isMe) { Spacer(modifier = Modifier.width(4.dp)) }
+        }
+
+        // Reaction bubble
+        message.reaction?.let { emoji ->
+            Surface(
+                modifier = Modifier.offset(y = (-6).dp).padding(horizontal = if (isMe) 8.dp else 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = RasGramTheme.DarkPanel,
+                border = BorderStroke(1.dp, RasGramTheme.Border)
+            ) {
+                Text(emoji, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 14.sp)
+            }
+        }
+    }
+
+    // Context menu
+    if (showContextMenu) {
+        MessageContextMenu(
+            message = message,
+            isMe = isMe,
+            onDismiss = { showContextMenu = false },
+            onReact = { emoji -> onReact(emoji); showContextMenu = false },
+            onReply = { onReply(); showContextMenu = false },
+            onDelete = { onDelete(); showContextMenu = false },
+            onCopy = { onCopy(); showContextMenu = false },
+            onStar = { onStar(); showContextMenu = false },
+            onForward = { showContextMenu = false }
+        )
+    }
+}
+
+@Composable
+fun DeletedMessageBubble(isMe: Boolean, timeString: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = if (isMe) RasGramTheme.BubbleOut.copy(alpha = 0.6f) else RasGramTheme.BubbleIn.copy(alpha = 0.6f)
+        ) {
+            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Block, null, modifier = Modifier.size(14.dp), tint = RasGramTheme.TextMuted)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("This message was deleted", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(timeString, style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun CallLogBubble(message: Message) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFF182229),
+            border = BorderStroke(0.5.dp, RasGramTheme.Border)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    if (message.callType == "video") Icons.Default.Videocam else Icons.Default.Call,
+                    null, modifier = Modifier.size(14.dp),
+                    tint = if (message.callStatus == "missed") RasGramTheme.Red else RasGramTheme.Green
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(message.text, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(message.timeString, style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun ImageMessageContent(url: String, context: Context) {
+    var showFullScreen by remember { mutableStateOf(false) }
+    AsyncImage(
+        model = url,
+        contentDescription = "Image",
+        modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp).clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)).clickable { showFullScreen = true },
+        contentScale = ContentScale.Crop
+    )
+    if (showFullScreen) {
+        Dialog(onDismissRequest = { showFullScreen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable { showFullScreen = false }, contentAlignment = Alignment.Center) {
+                AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
+                IconButton(onClick = { showFullScreen = false }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
+                    Icon(Icons.Default.Close, null, tint = Color.White)
+                }
+                IconButton(
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                ) {
+                    Icon(Icons.Default.Download, null, tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VideoMessageContent(url: String, fileName: String?, fileType: String?, context: Context) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)).clickable {
+            val intent = Intent(Intent.ACTION_VIEW, url.toUri())
+            intent.setDataAndType(url.toUri(), fileType)
+            context.startActivity(intent)
+        },
+        color = Color.Black.copy(0.6f)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.PlayCircle, null, tint = Color.White, modifier = Modifier.size(60.dp))
+            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(8.dp), shape = RoundedCornerShape(4.dp), color = Color.Black.copy(0.6f)) {
+                Text(fileName ?: "Video", modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+fun AudioMessageContent(url: String, fileName: String?, duration: Int) {
+    var isPlaying by remember { mutableStateOf(false) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    val mediaPlayer = remember { MediaPlayer() }
+    var durationMs by remember { mutableIntStateOf(if (duration > 0) duration * 1000 else 0) }
+    val scope = rememberCoroutineScope()
+
+    DisposableEffect(url) {
+        onDispose {
+            try { if (mediaPlayer.isPlaying) mediaPlayer.stop(); mediaPlayer.release() } catch (_: Exception) {}
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FloatingActionButton(
+            onClick = {
+                if (!isPlaying) {
+                    try {
+                        mediaPlayer.reset()
+                        mediaPlayer.setDataSource(url)
+                        mediaPlayer.prepareAsync()
+                        mediaPlayer.setOnPreparedListener { mp ->
+                            mp.start()
+                            durationMs = mp.duration
+                            isPlaying = true
+                            scope.launch {
+                                while (mp.isPlaying) {
+                                    progress = mp.currentPosition.toFloat() / mp.duration.toFloat()
+                                    delay(100)
+                                }
+                                progress = 0f
+                                isPlaying = false
+                            }
+                        }
+                        mediaPlayer.setOnCompletionListener { isPlaying = false; progress = 0f }
+                    } catch (_: Exception) {}
+                } else {
+                    mediaPlayer.pause(); isPlaying = false
+                }
+            },
+            modifier = Modifier.size(40.dp),
+            containerColor = RasGramTheme.Green,
+            elevation = FloatingActionButtonDefaults.elevation(0.dp)
+        ) {
+            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(3.dp),
+                color = RasGramTheme.Green,
+                trackColor = RasGramTheme.TextMuted.copy(0.3f)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(fileName ?: "Voice message", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (durationMs > 0) Text(formatTime(durationMs / 1000), color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+fun DocumentMessageContent(url: String, fileName: String?, fileType: String?, fileSize: Long, context: Context) {
+    val icon = when {
+        fileType?.contains("pdf") == true -> Icons.Default.PictureAsPdf
+        fileType?.contains("word") == true || fileType?.contains("document") == true -> Icons.Default.Description
+        fileType?.contains("sheet") == true || fileType?.contains("excel") == true -> Icons.Default.TableChart
+        fileType?.contains("presentation") == true || fileType?.contains("powerpoint") == true -> Icons.Default.Slideshow
+        fileType?.contains("zip") == true || fileType?.contains("archive") == true -> Icons.Default.FolderZip
+        else -> Icons.Default.InsertDriveFile
+    }
+    val iconColor = when {
+        fileType?.contains("pdf") == true -> RasGramTheme.Red
+        fileType?.contains("word") == true -> Color(0xFF2196F3)
+        fileType?.contains("sheet") == true || fileType?.contains("excel") == true -> RasGramTheme.Green
+        else -> RasGramTheme.TextMuted
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable {
+            val intent = Intent(Intent.ACTION_VIEW, url.toUri())
+            context.startActivity(intent)
+        }.padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(shape = RoundedCornerShape(10.dp), color = iconColor.copy(0.1f), modifier = Modifier.size(46.dp)) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.padding(10.dp))
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(fileName ?: "Document", style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (fileSize > 0) {
+                Text(formatFileSize(fileSize), style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted)
+            }
+        }
+        Icon(Icons.Default.Download, null, tint = RasGramTheme.TextMuted, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+fun MessageContextMenu(
+    message: Message,
+    isMe: Boolean,
+    onDismiss: () -> Unit,
+    onReact: (String) -> Unit,
+    onReply: () -> Unit,
+    onDelete: () -> Unit,
+    onCopy: () -> Unit,
+    onStar: () -> Unit,
+    onForward: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Emoji reactions
+            Surface(shape = RoundedCornerShape(24.dp), color = RasGramTheme.DarkPanel, modifier = Modifier.padding(bottom = 8.dp)) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "🔥").forEach { emoji ->
+                        Text(
+                            emoji,
+                            modifier = Modifier.clickable { onReact(emoji) }.padding(4.dp),
+                            fontSize = 26.sp
+                        )
+                    }
+                }
+            }
+
+            // Action menu
+            Surface(shape = RoundedCornerShape(16.dp), color = RasGramTheme.DarkPanel, modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    val actions = buildList {
+                        add(Triple(Icons.Default.Reply, "Reply", onReply))
+                        if (message.text.isNotEmpty()) add(Triple(Icons.Default.ContentCopy, "Copy Text", onCopy))
+                        add(Triple(Icons.Default.Forward, "Forward", onForward))
+                        add(Triple(Icons.Default.Star, if (message.isStarred) "Unstar" else "Star", onStar))
+                        if (isMe) add(Triple(Icons.Default.Delete, "Delete", onDelete))
+                    }
+                    actions.forEachIndexed { i, (icon, label, action) ->
+                        val isLast = i == actions.size - 1
+                        ListItem(
+                            headlineContent = { Text(label, color = if (label == "Delete") RasGramTheme.Red else RasGramTheme.TextPrimary) },
+                            leadingContent = { Icon(icon, null, tint = if (label == "Delete") RasGramTheme.Red else RasGramTheme.TextMuted) },
+                            modifier = Modifier.clickable { action() },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                        )
+                        if (!isLast) HorizontalDivider(color = RasGramTheme.DividerColor, thickness = 0.5.dp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Surface(shape = RoundedCornerShape(16.dp), color = RasGramTheme.DarkPanel, modifier = Modifier.fillMaxWidth()) {
+                ListItem(
+                    headlineContent = { Text("Cancel", color = RasGramTheme.TextPrimary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                    modifier = Modifier.clickable { onDismiss() },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                )
+            }
+        }
+    }
+}
+
+// ==================== STATUS TAB ====================
+@Composable
+fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var statuses by remember { mutableStateOf<List<Status>>(emptyList()) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isUploading by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            isUploading = true
+            scope.launch {
+                val (url, _, fileType) = uploadToCloudinary(context, it) { }
+                if (url != null) {
+                    val status = hashMapOf(
+                        "userMobile" to currentUser.mobile,
+                        "userName" to currentUser.name,
+                        "userAvatar" to currentUser.avatarUrl,
+                        "mediaUrl" to url,
+                        "mediaType" to if (fileType?.startsWith("video") == true) "video" else "image",
+                        "caption" to "",
+                        "timestamp" to System.currentTimeMillis(),
+                        "viewedBy" to listOf<String>(),
+                        "expiresAt" to (System.currentTimeMillis() + 86400_000)
+                    )
+                    db.collection("statuses").add(status).await()
+                    Toast.makeText(context, "Status posted!", Toast.LENGTH_SHORT).show()
+                }
+                isUploading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        db.collection("statuses")
+            .whereGreaterThan("expiresAt", System.currentTimeMillis())
+            .orderBy("expiresAt", Query.Direction.DESCENDING)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, _ ->
+                snap?.documents?.mapNotNull { doc ->
+                    doc.data?.let { d ->
+                        Status(
+                            id = doc.id,
+                            userMobile = d["userMobile"] as? String ?: "",
+                            userName = d["userName"] as? String ?: "",
+                            userAvatar = d["userAvatar"] as? String ?: "",
+                            mediaUrl = d["mediaUrl"] as? String ?: "",
+                            mediaType = d["mediaType"] as? String ?: "image",
+                            caption = d["caption"] as? String ?: "",
+                            timestamp = d["timestamp"] as? Long ?: 0,
+                            viewedBy = (d["viewedBy"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            expiresAt = d["expiresAt"] as? Long ?: 0
+                        )
+                    }
+                }?.also { statuses = it }
+            }
+    }
+
+    Column(modifier = modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
+        Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Status", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { imageLauncher.launch(arrayOf("image/*", "video/*")) }) {
+                    Icon(Icons.Default.Edit, null, tint = RasGramTheme.TextMuted)
+                }
+            }
+        }
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            // My status
+            item {
+                StatusItem(
+                    avatarUrl = currentUser.avatarUrl,
+                    name = "My Status",
+                    subtitle = if (isUploading) "Uploading..." else "Tap to add status update",
+                    hasNewStatus = false,
+                    onClick = { imageLauncher.launch(arrayOf("image/*", "video/*")) },
+                    isMyStatus = true
+                )
+                HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
+            }
+
+            val myStatuses = statuses.filter { it.userMobile == currentUser.mobile }
+            val othersStatuses = statuses.filter { it.userMobile != currentUser.mobile }
+                .groupBy { it.userMobile }
+
+            if (othersStatuses.isNotEmpty()) {
+                item {
+                    Text("Recent Updates", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
+                }
+                items(othersStatuses.entries.toList()) { (mobile, userStatuses) ->
+                    val first = userStatuses.first()
+                    val viewed = userStatuses.all { currentUser.mobile in it.viewedBy }
+                    StatusItem(
+                        avatarUrl = first.userAvatar,
+                        name = first.userName,
+                        subtitle = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(first.timestamp)),
+                        hasNewStatus = !viewed,
+                        onClick = { /* View status */ },
+                        isMyStatus = false
+                    )
+                    HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
+                }
+            } else {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Circle, null, modifier = Modifier.size(64.dp), tint = RasGramTheme.TextMuted.copy(0.3f))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No recent updates", color = RasGramTheme.TextMuted)
+                        Text("Status updates from your contacts will appear here.", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatusItem(avatarUrl: String, name: String, subtitle: String, hasNewStatus: Boolean, onClick: () -> Unit, isMyStatus: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(54.dp)) {
+            Box(
+                modifier = Modifier.fillMaxSize().border(
+                    width = 2.5.dp,
+                    color = when {
+                        isMyStatus -> RasGramTheme.Green
+                        hasNewStatus -> RasGramTheme.Green
+                        else -> RasGramTheme.TextMuted.copy(0.3f)
+                    },
+                    shape = CircleShape
+                ).padding(3.dp)
+            ) {
+                AsyncImage(
+                    model = avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${name.replace(" ", "+")}&background=008069&color=fff" },
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            if (isMyStatus) {
+                Surface(
+                    modifier = Modifier.size(20.dp).align(Alignment.BottomEnd),
+                    shape = CircleShape,
+                    color = RasGramTheme.Green,
+                    border = BorderStroke(2.dp, RasGramTheme.DarkBackground)
+                ) {
+                    Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.padding(4.dp))
+                }
+            }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column {
+            Text(name, style = MaterialTheme.typography.bodyLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+        }
+    }
+}
+
+// ==================== CALLS TAB ====================
+@Composable
+fun CallsTab(currentUser: User, modifier: Modifier = Modifier) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var callLogs by remember { mutableStateOf<List<Message>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        db.collectionGroup("pvt_msg_${currentUser.mobile}")
+            .whereEqualTo("isCallLog", true)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { _, _ -> }
+    }
+
+    Column(modifier = modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
+        Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Calls", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { }) {
+                    Icon(Icons.Default.AddCall, null, tint = RasGramTheme.TextMuted)
+                }
+            }
+        }
+
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(Icons.Default.Call, null, modifier = Modifier.size(80.dp), tint = RasGramTheme.TextMuted.copy(0.3f))
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("No Recent Calls", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextMuted)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Your call history will appear here.", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+// ==================== GROUPS TAB ====================
+@Composable
+fun GroupsTab(currentUser: User, onGroupSelect: (Group) -> Unit, modifier: Modifier = Modifier) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
+    var showCreateGroup by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        db.collection("groups")
+            .whereArrayContains("members", currentUser.mobile)
+            .addSnapshotListener { snap, _ ->
+                snap?.documents?.mapNotNull { doc ->
+                    doc.data?.let { d ->
+                        Group(
+                            id = doc.id,
+                            name = d["name"] as? String ?: "",
+                            avatarUrl = d["avatarUrl"] as? String ?: "",
+                            description = d["description"] as? String ?: "",
+                            members = (d["members"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            admins = (d["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            createdBy = d["createdBy"] as? String ?: "",
+                            createdAt = d["createdAt"] as? Long ?: 0
+                        )
+                    }
+                }?.also { groups = it }
+            }
+    }
+
+    Column(modifier = modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
+        Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Groups", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showCreateGroup = true }) {
+                    Icon(Icons.Default.GroupAdd, null, tint = RasGramTheme.TextMuted)
+                }
+            }
+        }
+
+        if (groups.isEmpty()) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(Icons.Default.Groups, null, modifier = Modifier.size(80.dp), tint = RasGramTheme.TextMuted.copy(0.3f))
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("No Groups Yet", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextMuted)
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { showCreateGroup = true }, colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)) {
+                    Icon(Icons.Default.GroupAdd, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Create Group", color = Color.Black)
+                }
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(groups, key = { it.id }) { group ->
+                    GroupItem(group = group, onClick = { onGroupSelect(group) })
+                    HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
+                }
+            }
+        }
+    }
+
+    if (showCreateGroup) {
+        NewGroupDialog(onDismiss = { showCreateGroup = false }, currentUser = currentUser)
+    }
+}
+
+@Composable
+fun GroupItem(group: Group, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
+            contentDescription = null,
+            modifier = Modifier.size(52.dp).clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(group.name, style = MaterialTheme.typography.bodyLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
+            Text("${group.members.size} members", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+        }
+    }
+}
+
+// ==================== WEBRTC CALLING SCREEN ====================
+@Composable
+fun CallingScreen(
+    currentUser: User,
+    contact: User,
+    callType: String,
+    onEndCall: () -> Unit
+) {
+    val context = LocalContext.current
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+
+    var callStatus by remember { mutableStateOf("Calling...") }
+    var isMuted by remember { mutableStateOf(false) }
+    var isCameraOff by remember { mutableStateOf(false) }
+    var isSpeakerOn by remember { mutableStateOf(callType == "video") }
+    var isConnected by remember { mutableStateOf(false) }
+    var callSeconds by remember { mutableIntStateOf(0) }
+    var callId by remember { mutableStateOf("") }
+
+    val eglBase = remember { EglBase.create() }
+    val peerConnectionFactory = remember {
+        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
+        PeerConnectionFactory.builder()
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
+            .createPeerConnectionFactory()
+    }
+    val iceServers = listOf(
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+    )
+
+    var peerConnection by remember { mutableStateOf<PeerConnection?>(null) }
+    var localStream by remember { mutableStateOf<MediaStream?>(null) }
+    var localVideoTrack by remember { mutableStateOf<VideoTrack?>(null) }
+    var remoteVideoTrack by remember { mutableStateOf<VideoTrack?>(null) }
+    var localSurfaceView by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    var remoteSurfaceView by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+
+    LaunchedEffect(Unit) {
+        val hasMicPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!hasMicPerm) { Toast.makeText(context, "Microphone permission needed", Toast.LENGTH_SHORT).show(); onEndCall(); return@LaunchedEffect }
+
+        try {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = isSpeakerOn
+            val chatHash = generateChatId(currentUser.mobile, contact.mobile)
+            callId = "call_${chatHash}_${System.currentTimeMillis()}"
+
+            val stream = peerConnectionFactory.createLocalMediaStream("localStream")
+            val audioSource = peerConnectionFactory.createAudioSource(MediaConstraints())
+            stream.addTrack(peerConnectionFactory.createAudioTrack("audioTrack", audioSource))
+
+            if (callType == "video") {
+                val hasCamPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                if (hasCamPerm) {
+                    getVideoCapturer(context)?.let { capturer ->
+                        val helper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
+                        val videoSource = peerConnectionFactory.createVideoSource(capturer.isScreencast)
+                        capturer.initialize(helper, context, videoSource.capturerObserver)
+                        capturer.startCapture(1280, 720, 30)
+                        val vTrack = peerConnectionFactory.createVideoTrack("videoTrack", videoSource)
+                        stream.addTrack(vTrack)
+                        localVideoTrack = vTrack
+                    }
+                }
+            }
+            localStream = stream
+
+            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+                rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            }
+
+            val observer = object : PeerConnection.Observer {
+                override fun onIceCandidate(candidate: IceCandidate?) {
+                    candidate?.let { c ->
+                        scope.launch {
+                            db.collection("calls").document(callId).collection("caller_ice").add(
+                                mapOf("sdpMid" to c.sdpMid, "sdpMLineIndex" to c.sdpMLineIndex, "candidate" to c.sdp)
+                            )
+                        }
+                    }
+                }
+                override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
+                override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    when (state) {
+                        PeerConnection.IceConnectionState.CONNECTED -> { callStatus = "Connected"; isConnected = true }
+                        PeerConnection.IceConnectionState.DISCONNECTED, PeerConnection.IceConnectionState.FAILED -> scope.launch { onEndCall() }
+                        else -> {}
+                    }
+                }
+                override fun onIceConnectionReceivingChange(b: Boolean) {}
+                override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
+                override fun onAddStream(s: MediaStream?) { s?.videoTracks?.firstOrNull()?.let { remoteVideoTrack = it } }
+                override fun onRemoveStream(s: MediaStream?) {}
+                override fun onDataChannel(d: DataChannel?) {}
+                override fun onRenegotiationNeeded() {}
+                override fun onAddTrack(r: RtpReceiver?, streams: Array<out MediaStream>?) {
+                    streams?.firstOrNull()?.videoTracks?.firstOrNull()?.let { remoteVideoTrack = it }
+                }
+            }
+
+            val pc = peerConnectionFactory.createPeerConnection(rtcConfig, observer)
+            stream.audioTracks.forEach { pc?.addTrack(it, listOf("localStream")) }
+            if (callType == "video") stream.videoTracks.forEach { pc?.addTrack(it, listOf("localStream")) }
+            peerConnection = pc
+
+            val offerConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                if (callType == "video") mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            }
+
+            pc?.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {
+                    sdp?.let { s ->
+                        pc.setLocalDescription(object : SdpObserver {
+                            override fun onCreateSuccess(s2: SessionDescription?) {}
+                            override fun onSetSuccess() {
+                                scope.launch {
+                                    db.collection("calls").document(callId).set(hashMapOf(
+                                        "caller" to currentUser.mobile, "callee" to contact.mobile,
+                                        "type" to callType, "status" to "calling",
+                                        "timestamp" to System.currentTimeMillis(),
+                                        "offer" to mapOf("type" to s.type.canonicalForm(), "sdp" to s.description)
+                                    ))
+                                }
+                            }
+                            override fun onCreateFailure(e: String?) {}
+                            override fun onSetFailure(e: String?) {}
+                        }, s)
+                    }
+                }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(e: String?) {}
+                override fun onSetFailure(e: String?) {}
+            }, offerConstraints)
+
+            db.collection("calls").document(callId).addSnapshotListener { snapshot, _ ->
+                val data = snapshot?.data ?: return@addSnapshotListener
+                when (data["status"] as? String) {
+                    "answered" -> {
+                        (data["answer"] as? Map<*, *>)?.let { ans ->
+                            val sdpStr = ans["sdp"] as? String ?: return@addSnapshotListener
+                            pc?.setRemoteDescription(object : SdpObserver {
+                                override fun onCreateSuccess(s: SessionDescription?) {}
+                                override fun onSetSuccess() {
+                                    callStatus = "Connected"; isConnected = true
+                                    scope.launch {
+                                        db.collection("calls").document(callId).collection("callee_ice").get().await()
+                                            .documents.forEach { doc ->
+                                                doc.data?.let { d ->
+                                                    pc?.addIceCandidate(IceCandidate(d["sdpMid"] as? String ?: "", (d["sdpMLineIndex"] as? Long)?.toInt() ?: 0, d["candidate"] as? String ?: ""))
+                                                }
+                                            }
+                                    }
+                                }
+                                override fun onCreateFailure(e: String?) {}
+                                override fun onSetFailure(e: String?) {}
+                            }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
+                        }
+                    }
+                    "ended", "rejected" -> scope.launch { onEndCall() }
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "Call error: ${e.message}", Toast.LENGTH_SHORT).show()
+            onEndCall()
+        }
+    }
+
+    LaunchedEffect(isConnected) {
+        if (isConnected) while (true) { delay(1000); callSeconds++ }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            peerConnection?.close()
+            localStream?.dispose()
+            audioManager.mode = AudioManager.MODE_NORMAL
+            audioManager.isSpeakerphoneOn = false
+            try { eglBase.release() } catch (_: Exception) {}
+        }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF0B141A)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (callType == "video") {
+                AndroidView(factory = { ctx ->
+                    SurfaceViewRenderer(ctx).also { it.init(eglBase.eglBaseContext, null); it.setMirror(false); remoteSurfaceView = it; remoteVideoTrack?.addSink(it) }
+                }, modifier = Modifier.fillMaxSize())
+                AndroidView(factory = { ctx ->
+                    SurfaceViewRenderer(ctx).also { it.init(eglBase.eglBaseContext, null); it.setMirror(true); localSurfaceView = it; localVideoTrack?.addSink(it) }
+                }, modifier = Modifier.size(120.dp, 160.dp).align(Alignment.TopEnd).padding(16.dp).clip(RoundedCornerShape(12.dp)))
+            }
+
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(modifier = Modifier.height(80.dp))
+                if (callType != "video" || !isConnected) {
+                    AsyncImage(
+                        model = contact.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${contact.name.replace(" ", "+")}&size=200&background=008069&color=fff" },
+                        contentDescription = null,
+                        modifier = Modifier.size(120.dp).clip(CircleShape).border(3.dp, RasGramTheme.Green, CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(contact.name, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(if (isConnected) formatTime(callSeconds) else callStatus, color = RasGramTheme.Green, style = MaterialTheme.typography.titleMedium)
+                }
+                Spacer(modifier = Modifier.weight(1f))
+
+                Surface(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), color = Color(0xFF182229).copy(0.95f), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CallControlButton(icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic, label = if (isMuted) "Unmute" else "Mute", isActive = isMuted, activeColor = RasGramTheme.Red) {
+                                isMuted = !isMuted
+                                localStream?.audioTracks?.firstOrNull()?.setEnabled(!isMuted)
+                            }
+                            FloatingActionButton(onClick = { scope.launch { if (callId.isNotEmpty()) db.collection("calls").document(callId).update("status", "ended"); onEndCall() } }, containerColor = RasGramTheme.Red, modifier = Modifier.size(72.dp)) {
+                                Icon(Icons.Default.CallEnd, null, tint = Color.White, modifier = Modifier.size(32.dp))
+                            }
+                            CallControlButton(icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff, label = "Speaker", isActive = isSpeakerOn, activeColor = RasGramTheme.Green) {
+                                isSpeakerOn = !isSpeakerOn
+                                audioManager.isSpeakerphoneOn = isSpeakerOn
+                            }
+                        }
+                        if (callType == "video") {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                CallControlButton(icon = if (isCameraOff) Icons.Default.VideocamOff else Icons.Default.Videocam, label = "Camera", isActive = isCameraOff, activeColor = RasGramTheme.Red) {
+                                    isCameraOff = !isCameraOff
+                                    localStream?.videoTracks?.firstOrNull()?.setEnabled(!isCameraOff)
+                                }
+                                CallControlButton(icon = Icons.Default.Cameraswitch, label = "Flip", isActive = false, activeColor = RasGramTheme.Green) { }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CallControlButton(icon: ImageVector, label: String, isActive: Boolean, activeColor: Color, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FloatingActionButton(
+            onClick = onClick,
+            containerColor = if (isActive) activeColor else Color.White.copy(0.15f),
+            modifier = Modifier.size(56.dp)
+        ) {
+            Icon(icon, label, tint = Color.White)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(label, color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+// ==================== SETTINGS DIALOG ====================
+@Composable
+fun SettingsDialog(
+    currentUser: User,
+    onDismiss: () -> Unit,
+    onSave: (User) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(currentUser.name) }
+    var about by remember { mutableStateOf(currentUser.about) }
+    var isUploading by remember { mutableStateOf(false) }
+    var avatarUrl by remember { mutableStateOf(currentUser.avatarUrl) }
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            isUploading = true
+            scope.launch {
+                val (url, _, _) = uploadToCloudinary(context, it) { }
+                if (url != null) {
+                    avatarUrl = url
+                    db.collection("chat_users").document(currentUser.mobile).update("avatarUrl", url)
+                    Toast.makeText(context, "Profile photo updated!", Toast.LENGTH_SHORT).show()
+                }
+                isUploading = false
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState()), shape = RoundedCornerShape(20.dp), color = RasGramTheme.DarkPanel) {
+            Column {
+                // Header with gradient
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(160.dp).background(
+                        Brush.verticalGradient(listOf(RasGramTheme.GreenDark, RasGramTheme.DarkPanel))
+                    ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        AsyncImage(
+                            model = avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${currentUser.name.replace(" ", "+")}&background=008069&color=fff&size=200" },
+                            contentDescription = null,
+                            modifier = Modifier.size(96.dp).clip(CircleShape).border(3.dp, Color.White, CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                        FloatingActionButton(onClick = { imageLauncher.launch(arrayOf("image/*")) }, modifier = Modifier.size(34.dp), containerColor = RasGramTheme.Green) {
+                            Icon(Icons.Default.CameraAlt, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                Column(modifier = Modifier.padding(20.dp)) {
+                    // Tabs
+                    Row(modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkBackground, RoundedCornerShape(10.dp)).padding(4.dp)) {
+                        listOf("Profile", "Privacy", "Notifications").forEachIndexed { i, label ->
+                            Surface(
+                                modifier = Modifier.weight(1f).clickable { selectedTab = i },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selectedTab == i) RasGramTheme.Green else Color.Transparent
+                            ) {
+                                Text(label, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center, color = if (selectedTab == i) Color.Black else RasGramTheme.TextMuted, style = MaterialTheme.typography.labelMedium, fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    when (selectedTab) {
+                        0 -> {
+                            // Profile tab
+                            OutlinedTextField(value = name, onValueChange = { if (it.length <= 25) name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), colors = outlinedFieldColors(), shape = RoundedCornerShape(12.dp), trailingIcon = { Text("${name.length}/25", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 8.dp)) })
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedTextField(value = about, onValueChange = { if (it.length <= 139) about = it }, label = { Text("About") }, modifier = Modifier.fillMaxWidth(), colors = outlinedFieldColors(), shape = RoundedCornerShape(12.dp), maxLines = 2, trailingIcon = { Text("${about.length}/139", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 8.dp)) })
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Phone, null, tint = RasGramTheme.Green, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("+${currentUser.mobile}", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        1 -> {
+                            SettingsToggleRow(Icons.Default.Visibility, "Show Last Seen", true) { }
+                            SettingsToggleRow(Icons.Default.DoneAll, "Show Read Receipts", true) { }
+                            SettingsToggleRow(Icons.Default.ProfileBadge, "Show Profile Photo", true) { }
+                            SettingsToggleRow(Icons.Default.Circle, "Show Status", true) { }
+                        }
+                        2 -> {
+                            SettingsToggleRow(Icons.Default.Notifications, "Message Notifications", true) { }
+                            SettingsToggleRow(Icons.Default.VolumeUp, "Notification Sound", true) { }
+                            SettingsToggleRow(Icons.Default.Vibration, "Vibration", true) { }
+                            SettingsToggleRow(Icons.Default.Groups, "Group Notifications", true) { }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, RasGramTheme.Border), colors = ButtonDefaults.outlinedButtonColors(contentColor = RasGramTheme.TextMuted)) { Text("Cancel") }
+                        Button(onClick = {
+                            scope.launch {
+                                db.collection("chat_users").document(currentUser.mobile).update("name", name, "about", about)
+                            }
+                            onSave(currentUser.copy(name = name, about = about, avatarUrl = avatarUrl))
+                        }, modifier = Modifier.weight(2f).height(48.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)) {
+                            Text("Save Changes", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsToggleRow(icon: ImageVector, label: String, initialValue: Boolean, onChange: (Boolean) -> Unit) {
+    var checked by remember { mutableStateOf(initialValue) }
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = RasGramTheme.Green, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(label, color = RasGramTheme.TextPrimary, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = { checked = it; onChange(it) }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = RasGramTheme.Green, uncheckedTrackColor = RasGramTheme.TextMuted.copy(0.3f)))
+    }
+}
+
+// ==================== NEW GROUP DIALOG ====================
+@Composable
+fun NewGroupDialog(onDismiss: () -> Unit, currentUser: User) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var groupName by remember { mutableStateOf("") }
+    var groupDesc by remember { mutableStateOf("") }
+    var allUsers by remember { mutableStateOf<List<User>>(emptyList()) }
+    var selectedMembers by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var step by remember { mutableIntStateOf(0) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        db.collection("chat_users").get().await().documents.mapNotNull { doc ->
+            doc.data?.let { d ->
+                User(name = d["name"] as? String ?: "", mobile = doc.id, avatarUrl = d["avatarUrl"] as? String ?: "")
+            }
+        }.filter { it.mobile != currentUser.mobile }.also { allUsers = it }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(20.dp), color = RasGramTheme.DarkPanel) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { if (step > 0) step-- else onDismiss() }) {
+                        Icon(Icons.Default.ArrowBack, null, tint = RasGramTheme.TextMuted)
+                    }
+                    Text(if (step == 0) "Add Participants" else "New Group", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (step == 0 && selectedMembers.isNotEmpty()) {
+                        FloatingActionButton(onClick = { step = 1 }, modifier = Modifier.size(44.dp), containerColor = RasGramTheme.Green) {
+                            Icon(Icons.Default.ArrowForward, null, tint = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (step == 0) {
+                    // Select members
+                    if (selectedMembers.isNotEmpty()) {
+                        Text("${selectedMembers.size} selected", color = RasGramTheme.Green, style = MaterialTheme.typography.labelSmall)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp)) {
+                        items(allUsers, key = { it.mobile }) { user ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    selectedMembers = if (user.mobile in selectedMembers) selectedMembers - user.mobile else selectedMembers + user.mobile
+                                }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = user.mobile in selectedMembers,
+                                    onCheckedChange = { checked ->
+                                        selectedMembers = if (checked) selectedMembers + user.mobile else selectedMembers - user.mobile
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = RasGramTheme.Green)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                AsyncImage(
+                                    model = user.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${user.name.replace(" ", "+")}&background=008069&color=fff" },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp).clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(user.name, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Medium)
+                                    Text("+${user.mobile}", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Group details
+                    OutlinedTextField(value = groupName, onValueChange = { if (it.length <= 30) groupName = it }, label = { Text("Group Name") }, modifier = Modifier.fillMaxWidth(), colors = outlinedFieldColors(), shape = RoundedCornerShape(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(value = groupDesc, onValueChange = { groupDesc = it }, label = { Text("Description (optional)") }, modifier = Modifier.fillMaxWidth(), colors = outlinedFieldColors(), shape = RoundedCornerShape(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("${selectedMembers.size} participants", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            if (groupName.isNotBlank()) {
+                                isLoading = true
+                                scope.launch {
+                                    try {
+                                        val members = selectedMembers.toMutableList().also { it.add(currentUser.mobile) }
+                                        db.collection("groups").add(hashMapOf(
+                                            "name" to groupName, "description" to groupDesc,
+                                            "members" to members, "admins" to listOf(currentUser.mobile),
+                                            "createdBy" to currentUser.mobile, "createdAt" to System.currentTimeMillis(),
+                                            "avatarUrl" to ""
+                                        )).await()
+                                        Toast.makeText(context, "Group created!", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        isLoading = false
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                        enabled = groupName.isNotBlank() && !isLoading
+                    ) {
+                        if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                        else Text("Create Group", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== EMPTY STATE ====================
+@Composable
+fun EmptyChatState() {
+    Column(
+        modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(modifier = Modifier.size(140.dp), shape = CircleShape, color = RasGramTheme.DarkPanel) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Send, null, tint = RasGramTheme.Green, modifier = Modifier.size(64.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("RasGram", style = MaterialTheme.typography.headlineLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Light, letterSpacing = 2.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Click on a contact to start chatting", style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextMuted, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(32.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = RasGramTheme.Green)
+            Text("Your personal messages are end-to-end encrypted", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+        }
+    }
+}
+
+// ==================== CLOUDINARY UPLOAD ====================
+suspend fun uploadToCloudinary(
+    context: Context,
+    uri: Uri,
+    onProgress: (Float) -> Unit = {}
+): Triple<String?, String?, String?> = withContext(Dispatchers.IO) {
     try {
         val contentResolver = context.contentResolver
         val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-        val fileName = getFileNameFromUri(context, uri) ?: "file_${System.currentTimeMillis()}"
-        val fileSize = getFileSize(context, uri)
+        val fileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
 
-        val inputStream: InputStream = contentResolver.openInputStream(uri) ?: return@withContext FileUploadResult()
+        val inputStream: InputStream = contentResolver.openInputStream(uri)
+            ?: return@withContext Triple(null, null, null)
         val tempFile = File(context.cacheDir, fileName)
         tempFile.outputStream().use { out -> inputStream.copyTo(out) }
 
         val client = OkHttpClient.Builder()
-            .connectTimeout(120, TimeUnit.SECONDS)
+            .connectTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
 
+        val fileBody = tempFile.asRequestBody(mimeType.toMediaTypeOrNull())
+
+        val progressBody = object : RequestBody() {
+            override fun contentType() = mimeType.toMediaTypeOrNull()
+            override fun contentLength() = tempFile.length()
+            override fun writeTo(sink: okio.BufferedSink) {
+                val buf = okio.Buffer()
+                val source = okio.Okio.source(tempFile)
+                val total = tempFile.length()
+                var uploaded = 0L
+                val segmentSize = 2048L
+                var read: Long
+                while (source.read(buf, segmentSize).also { read = it } != -1L) {
+                    sink.write(buf, read)
+                    uploaded += read
+                    val prog = uploaded.toFloat() / total.toFloat()
+                    kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) { onProgress(prog) } }
+                }
+            }
+        }
+
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("file", fileName, tempFile.asRequestBody(mimeType.toMediaTypeOrNull()))
+            .addFormDataPart("file", fileName, fileBody)
             .addFormDataPart("upload_preset", CLOUDINARY_UPLOAD_PRESET)
             .build()
 
-        val request = Request.Builder()
-            .url("https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/raw/upload") // 'raw' supports ANY file type
-            .post(requestBody)
-            .build()
-
+        val request = Request.Builder().url(CLOUDINARY_UPLOAD_URL).post(requestBody).build()
         val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: return@withContext FileUploadResult()
+        val responseBody = response.body?.string() ?: return@withContext Triple(null, null, null)
+
+        if (!response.isSuccessful) return@withContext Triple(null, null, null)
+
         val json = JSONObject(responseBody)
         val url = json.optString("secure_url", null)
         tempFile.delete()
-
-        FileUploadResult(url, fileName, mimeType, fileSize)
+        Triple(url, fileName, mimeType)
     } catch (e: Exception) {
-        e.printStackTrace()
-        FileUploadResult()
+        Triple(null, null, null)
     }
 }
 
-data class FileUploadResult(val url: String? = null, val name: String? = null, val type: String? = null, val size: String? = null)
-
-fun getFileNameFromUri(context: Context, uri: Uri): String? {
-    var result: String? = null
-    if (uri.scheme == "content") {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index != -1) result = cursor.getString(index)
-            }
-        }
+fun getFileName(context: Context, uri: Uri): String? = try {
+    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
     }
-    if (result == null) {
-        result = uri.path
-        val cut = result?.lastIndexOf('/') ?: -1
-        if (cut != -1) result = result?.substring(cut + 1)
-    }
-    return result
-}
+} catch (_: Exception) { null }
 
-fun getFileSize(context: Context, uri: Uri): String {
-    return try {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-            cursor.moveToFirst()
-            val size = cursor.getLong(sizeIndex)
-            formatSize(size)
-        } ?: "Unknown"
-    } catch (e: Exception) {
-        "Unknown"
-    }
-}
-
-fun formatSize(size: Long): String {
-    if (size <= 0) return "0 B"
-    val units = arrayOf("B", "KB", "MB", "GB", "TB")
-    val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-    return String.format(Locale.US, "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-}
-
-// ==================== SEND MESSAGE LOGIC ====================
+// ==================== SEND MESSAGE ====================
 fun sendMessage(
     db: FirebaseFirestore,
     chatId: String,
     senderMobile: String,
+    receiverMobile: String,
     text: String,
-    fileUrl: String?,
-    fileName: String?,
-    fileType: String?,
-    fileSize: String?,
-    replyToId: String?
+    fileUrl: String? = null,
+    fileName: String? = null,
+    fileType: String? = null,
+    replyToId: String? = null,
+    replyToText: String? = null,
+    replyToSender: String? = null,
+    duration: Int = 0
 ) {
-    val msgId = db.collection("chats").document(chatId).collection("messages").document().id
-    val message = Message(
-        id = msgId,
-        text = text,
-        senderMobile = senderMobile,
-        timestamp = System.currentTimeMillis(),
-        timeString = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()),
-        fileUrl = fileUrl,
-        fileName = fileName,
-        fileType = fileType,
-        fileSize = fileSize,
-        replyToMessageId = replyToId,
-        read = false
+    val now = System.currentTimeMillis()
+    val message = hashMapOf(
+        "text" to text,
+        "senderMobile" to senderMobile,
+        "receiverMobile" to receiverMobile,
+        "timestamp" to now,
+        "timeString" to SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now)),
+        "fileUrl" to fileUrl,
+        "fileName" to fileName,
+        "fileType" to fileType,
+        "reaction" to null,
+        "read" to false,
+        "delivered" to false,
+        "isCallLog" to false,
+        "isDeleted" to false,
+        "isForwarded" to false,
+        "isStarred" to false,
+        "replyToId" to replyToId,
+        "replyToText" to replyToText,
+        "replyToSender" to replyToSender,
+        "duration" to duration
     )
-    // Save to subcollection
-    db.collection("chats").document(chatId).collection("messages").document(msgId).set(message)
-    // Update latest activity for chat list sorting
-    db.collection("chats").document(chatId).set(mapOf("lastUpdate" to System.currentTimeMillis()), SetOptions.merge())
+    db.collection("pvt_msg_$chatId").add(message)
 }
 
-// ==================== UTILS ====================
-fun generateChatId(m1: String, m2: String): String = if (m1 < m2) "${m1}_${m2}" else "${m2}_${m1}"
+// ==================== HELPER FUNCTIONS ====================
+fun generateChatId(mobile1: String, mobile2: String): String =
+    if (mobile1 < mobile2) "${mobile1}_${mobile2}" else "${mobile2}_${mobile1}"
 
-fun Modifier.rightBorder(width: Dp, color: Color) = this.drawBehind {
-    drawLine(color, Offset(size.width, 0f), Offset(size.width, size.height), width.toPx())
+fun getFileTypePreview(message: Message): String = when {
+    message.isDeleted -> "🚫 This message was deleted"
+    message.isCallLog -> "${if (message.callType == "video") "📹" else "📞"} ${message.text}"
+    message.fileType?.startsWith("image/") == true -> "📷 Photo"
+    message.fileType?.startsWith("video/") == true -> "🎥 Video"
+    message.fileType?.startsWith("audio/") == true -> "🎤 Voice message"
+    message.fileType?.contains("pdf") == true -> "📄 ${message.fileName ?: "PDF"}"
+    message.fileUrl != null -> "📎 ${message.fileName ?: "Document"}"
+    else -> message.text
+}
+
+fun formatTime(seconds: Int): String {
+    val mins = seconds / 60
+    val secs = seconds % 60
+    return "%d:%02d".format(mins, secs)
+}
+
+fun formatLastSeen(diffMs: Long): String {
+    val mins = diffMs / 60_000
+    val hours = mins / 60
+    val days = hours / 24
+    return when {
+        mins < 2 -> "just now"
+        mins < 60 -> "${mins}m ago"
+        hours < 24 -> "${hours}h ago"
+        days == 1L -> "yesterday"
+        else -> "${days}d ago"
+    }
+}
+
+fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+        else -> "${bytes / (1024 * 1024 * 1024)} GB"
+    }
 }
 
 @Composable
@@ -1014,11 +3531,34 @@ fun outlinedFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedBorderColor = RasGramTheme.Border,
     focusedTextColor = RasGramTheme.TextPrimary,
     unfocusedTextColor = RasGramTheme.TextPrimary,
-    cursorColor = RasGramTheme.Green
+    cursorColor = RasGramTheme.Green,
+    focusedLabelColor = RasGramTheme.Green,
+    unfocusedLabelColor = RasGramTheme.TextMuted,
+    focusedContainerColor = RasGramTheme.InputBg,
+    unfocusedContainerColor = RasGramTheme.InputBg
 )
 
-// ==================== STUB COMPONENTS ====================
-@Composable fun EmptyChatState() { Box(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground), contentAlignment = Alignment.Center) { Text("Select a chat to start messaging", color = RasGramTheme.TextMuted) } }
-@Composable fun StatusTab() { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Status Features Coming Soon", color = RasGramTheme.TextMuted) } }
-@Composable fun CallsTab() { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Call Logs Coming Soon", color = RasGramTheme.TextMuted) } }
-@Composable fun SettingsDialog(user: User, db: FirebaseFirestore, onDismiss: () -> Unit) { AlertDialog(onDismissRequest = onDismiss, title = { Text("Profile") }, text = { Text("Settings UI Here") }, confirmButton = { Button(onClick = onDismiss) { Text("OK") } }) }
+fun Modifier.rightBorder(width: Dp, color: Color): Modifier = this.then(
+    Modifier.drawBehind {
+        drawLine(color = color, start = Offset(size.width, 0f), end = Offset(size.width, size.height), strokeWidth = width.toPx())
+    }
+)
+
+@Composable
+fun isCompactScreen(): Boolean {
+    val configuration = LocalConfiguration.current
+    return configuration.screenWidthDp < 600
+}
+
+fun getVideoCapturer(context: Context): VideoCapturer? = try {
+    val e2 = Camera2Enumerator(context)
+    e2.deviceNames.firstOrNull { e2.isFrontFacing(it) }?.let { e2.createCapturer(it, null) }
+} catch (_: Exception) {
+    try {
+        val e1 = Camera1Enumerator(false)
+        e1.deviceNames.firstOrNull { e1.isFrontFacing(it) }?.let { e1.createCapturer(it, null) }
+    } catch (_: Exception) { null }
+}
+
+// Extension to handle MaterialTheme.bodySmall
+private val MaterialTheme.bodySmall get() = typography.bodySmall
