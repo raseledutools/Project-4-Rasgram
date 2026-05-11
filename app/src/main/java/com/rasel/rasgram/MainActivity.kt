@@ -82,6 +82,7 @@ import kotlinx.coroutines.tasks.await
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
+import okio.source  // FIX #4: correct import for extension function
 import org.json.JSONObject
 import org.webrtc.*
 import java.io.File
@@ -229,11 +230,10 @@ class MainActivity : ComponentActivity() {
         FirebaseApp.initializeApp(this)
 
         val db = FirebaseFirestore.getInstance()
+        // FIX #1: setSizeBytes doesn't exist on MemoryCacheSettings — removed it
         val settings = FirebaseFirestoreSettings.Builder()
             .setLocalCacheSettings(
-                MemoryCacheSettings.newBuilder()
-                    .setSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
-                    .build()
+                MemoryCacheSettings.newBuilder().build()
             )
             .build()
         db.firestoreSettings = settings
@@ -655,7 +655,8 @@ fun NameInputStep(
         )
         if (errorMsg.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(errorMsg, color = RasGramTheme.Red, style = MaterialTheme.bodySmall)
+            // FIX: was RasGramTheme.bodySmall (invalid), now MaterialTheme.typography.bodySmall
+            Text(errorMsg, color = RasGramTheme.Red, style = MaterialTheme.typography.bodySmall)
         }
         Spacer(modifier = Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1637,21 +1638,22 @@ fun ChatArea(
                 }
             }
 
-            // Scroll to bottom FAB
+            // FIX #5: AnimatedVisibility wrapped in Box to avoid ColumnScope implicit receiver error
             val showScrollFab by remember { derivedStateOf { listState.firstVisibleItemIndex < messages.size - 5 && messages.size > 10 } }
-            AnimatedVisibility(
-                visible = showScrollFab,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
-            ) {
-                FloatingActionButton(
-                    onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
-                    modifier = Modifier.size(40.dp),
-                    containerColor = RasGramTheme.DarkPanel,
-                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                AnimatedVisibility(
+                    visible = showScrollFab,
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut()
                 ) {
-                    Icon(Icons.Default.KeyboardArrowDown, null, tint = RasGramTheme.TextMuted)
+                    FloatingActionButton(
+                        onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
+                        modifier = Modifier.size(40.dp),
+                        containerColor = RasGramTheme.DarkPanel,
+                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, null, tint = RasGramTheme.TextMuted)
+                    }
                 }
             }
         }
@@ -2736,8 +2738,9 @@ fun CallsTab(currentUser: User, modifier: Modifier = Modifier) {
         Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Calls", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                // FIX #3: Icons.Default.AddCall doesn't exist — replaced with PhoneForwarded
                 IconButton(onClick = { }) {
-                    Icon(Icons.Default.AddCall, null, tint = RasGramTheme.TextMuted)
+                    Icon(Icons.Default.PhoneForwarded, null, tint = RasGramTheme.TextMuted)
                 }
             }
         }
@@ -3186,9 +3189,10 @@ fun SettingsDialog(
                             }
                         }
                         1 -> {
+                            // FIX #2: Icons.Default.ProfileBadge doesn't exist — replaced with AccountCircle
                             SettingsToggleRow(Icons.Default.Visibility, "Show Last Seen", true) { }
                             SettingsToggleRow(Icons.Default.DoneAll, "Show Read Receipts", true) { }
-                            SettingsToggleRow(Icons.Default.ProfileBadge, "Show Profile Photo", true) { }
+                            SettingsToggleRow(Icons.Default.AccountCircle, "Show Profile Photo", true) { }
                             SettingsToggleRow(Icons.Default.Circle, "Show Status", true) { }
                         }
                         2 -> {
@@ -3400,12 +3404,13 @@ suspend fun uploadToCloudinary(
             override fun contentLength() = tempFile.length()
             override fun writeTo(sink: okio.BufferedSink) {
                 val buf = okio.Buffer()
-                val source = okio.Okio.source(tempFile)
+                // FIX #4: was okio.Okio.source(tempFile) — now extension function tempFile.source()
+                val src = tempFile.source()
                 val total = tempFile.length()
                 var uploaded = 0L
                 val segmentSize = 2048L
                 var read: Long
-                while (source.read(buf, segmentSize).also { read = it } != -1L) {
+                while (src.read(buf, segmentSize).also { read = it } != -1L) {
                     sink.write(buf, read)
                     uploaded += read
                     val prog = uploaded.toFloat() / total.toFloat()
