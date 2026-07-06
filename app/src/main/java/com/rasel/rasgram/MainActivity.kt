@@ -819,6 +819,7 @@ fun MainScreen(
     var selectedContact by remember { mutableStateOf<User?>(null) }
     var selectedGroup by remember { mutableStateOf<Group?>(null) }
     var showCallUI by remember { mutableStateOf(false) }
+    var selectedStatusUser by remember { mutableStateOf<List<Status>?>(null) }
     var callType by remember { mutableStateOf("audio") }
     var callContact by remember { mutableStateOf<User?>(null) }
     var liveCurrentUser by remember { mutableStateOf(currentUser) }
@@ -2629,7 +2630,7 @@ fun MessageContextMenu(
 
 // ==================== STATUS TAB ====================
 @Composable
-fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
+fun StatusTab(currentUser: User, onStatusClick: (List<Status>) -> Unit, modifier: Modifier = Modifier) {
     val db = remember { FirebaseFirestore.getInstance() }
     var statuses by remember { mutableStateOf<List<Status>>(emptyList()) }
     val context = LocalContext.current
@@ -2704,7 +2705,10 @@ fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
                     name = "My Status",
                     subtitle = if (isUploading) "Uploading..." else "Tap to add status update",
                     hasNewStatus = false,
-                    onClick = { imageLauncher.launch(arrayOf("image/*", "video/*")) },
+                    onClick = { 
+                        if (myStatuses.isNotEmpty()) onStatusClick(myStatuses) 
+                        else imageLauncher.launch(arrayOf("image/*", "video/*"))
+                    },
                     isMyStatus = true
                 )
                 HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
@@ -2726,7 +2730,7 @@ fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
                         name = first.userName,
                         subtitle = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(first.timestamp)),
                         hasNewStatus = !viewed,
-                        onClick = { /* View status */ },
+                        onClick = { onStatusClick(userStatuses) },
                         isMyStatus = false
                     )
                     HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
@@ -3778,3 +3782,83 @@ fun getVideoCapturer(context: Context): VideoCapturer? = try {
     } catch (_: Exception) { null }
 }
 
+
+// ==================== STATUS VIEWER SCREEN ====================
+@Composable
+fun StatusViewerScreen(
+    statuses: List<Status>,
+    initialIndex: Int,
+    onClose: () -> Unit
+) {
+    var currentIndex by remember { mutableIntStateOf(initialIndex) }
+    if (currentIndex >= statuses.size || currentIndex < 0) {
+        onClose()
+        return
+    }
+    
+    val currentStatus = statuses[currentIndex]
+    var progress by remember { mutableFloatStateOf(0f) }
+    
+    LaunchedEffect(currentIndex) {
+        progress = 0f
+        val duration = 5000L // 5 seconds per image status
+        val interval = 50L
+        while (progress < 1f) {
+            delay(interval)
+            progress += interval.toFloat() / duration
+        }
+        currentIndex++
+    }
+    
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AsyncImage(
+            model = currentStatus.mediaUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
+        )
+        
+        // Progress bars
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp, start = 8.dp, end = 8.dp).statusBarsPadding()) {
+            statuses.forEachIndexed { index, status ->
+                val p = when {
+                    index < currentIndex -> 1f
+                    index == currentIndex -> progress
+                    else -> 0f
+                }
+                LinearProgressIndicator(
+                    progress = { p },
+                    modifier = Modifier.weight(1f).padding(horizontal = 2.dp).height(3.dp).clip(RoundedCornerShape(1.dp)),
+                    color = Color.White,
+                    trackColor = Color.Gray.copy(alpha = 0.5f)
+                )
+            }
+        }
+        
+        // Header
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
+            AsyncImage(
+                model = currentStatus.userAvatar.ifEmpty { "https://ui-avatars.com/api/?name=${currentStatus.userName.replace(" ", "+")}&background=008069&color=fff" },
+                contentDescription = null,
+                modifier = Modifier.size(40.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(currentStatus.userName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(formatLastSeen(System.currentTimeMillis() - currentStatus.timestamp), color = Color.LightGray, fontSize = 13.sp)
+            }
+        }
+        
+        // Tap areas for navigation
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {
+                if (currentIndex > 0) currentIndex-- else progress = 0f
+            })
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {
+                currentIndex++
+            })
+        }
+    }
+}
