@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
         FirebaseApp.initializeApp(this)
 
         val db = FirebaseFirestore.getInstance()
-        // FIX #1: setSizeBytes doesn't exist on MemoryCacheSettings — removed it
+        // FIX #1: setSizeBytes doesn't exist on MemoryCacheSettings â€” removed it
         val settings = FirebaseFirestoreSettings.Builder()
             .setLocalCacheSettings(
                 MemoryCacheSettings.newBuilder().build()
@@ -554,7 +554,7 @@ fun PhoneInputStep(
     errorMsg: String,
     onNext: () -> Unit
 ) {
-    val countryCodes = listOf("+880" to "🇧🇩 BD", "+1" to "🇺🇸 US", "+44" to "🇬🇧 UK", "+91" to "🇮🇳 IN", "+971" to "🇦🇪 AE", "+966" to "🇸🇦 SA")
+    val countryCodes = listOf("+880" to "ðŸ‡§ðŸ‡© BD", "+1" to "ðŸ‡ºðŸ‡¸ US", "+44" to "ðŸ‡¬ðŸ‡§ UK", "+91" to "ðŸ‡®ðŸ‡³ IN", "+971" to "ðŸ‡¦ðŸ‡ª AE", "+966" to "ðŸ‡¸ðŸ‡¦ SA")
     var showDropdown by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(countryCodes[0]) }
 
@@ -1321,7 +1321,7 @@ fun ContactItem(
                             )
                         }
                         val previewText = when {
-                            latestMessage?.isDeleted == true -> "🚫 This message was deleted"
+                            latestMessage?.isDeleted == true -> "ðŸš« This message was deleted"
                             latestMessage?.text?.isNotEmpty() == true -> latestMessage.text
                             latestMessage != null -> getFileTypePreview(latestMessage)
                             else -> "Tap to start chatting"
@@ -2512,7 +2512,7 @@ fun MessageContextMenu(
             // Emoji reactions
             Surface(shape = RoundedCornerShape(24.dp), color = RasGramTheme.DarkPanel, modifier = Modifier.padding(bottom = 8.dp)) {
                 Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "🔥").forEach { emoji ->
+                    listOf("ðŸ‘", "â¤ï¸", "ðŸ˜‚", "ðŸ˜®", "ðŸ˜¢", "ðŸ™", "ðŸ”¥").forEach { emoji ->
                         Text(
                             emoji,
                             modifier = Modifier.clickable { onReact(emoji) }.padding(4.dp),
@@ -2738,7 +2738,7 @@ fun CallsTab(currentUser: User, modifier: Modifier = Modifier) {
         Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Calls", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                // FIX #3: Icons.Default.AddCall doesn't exist — replaced with PhoneForwarded
+                // FIX #3: Icons.Default.AddCall doesn't exist â€” replaced with PhoneForwarded
                 IconButton(onClick = { }) {
                     Icon(Icons.Default.PhoneForwarded, null, tint = RasGramTheme.TextMuted)
                 }
@@ -3189,7 +3189,7 @@ fun SettingsDialog(
                             }
                         }
                         1 -> {
-                            // FIX #2: Icons.Default.ProfileBadge doesn't exist — replaced with AccountCircle
+                            // FIX #2: Icons.Default.ProfileBadge doesn't exist â€” replaced with AccountCircle
                             SettingsToggleRow(Icons.Default.Visibility, "Show Last Seen", true) { }
                             SettingsToggleRow(Icons.Default.DoneAll, "Show Read Receipts", true) { }
                             SettingsToggleRow(Icons.Default.AccountCircle, "Show Profile Photo", true) { }
@@ -3404,7 +3404,7 @@ suspend fun uploadToCloudinary(
             override fun contentLength() = tempFile.length()
             override fun writeTo(sink: okio.BufferedSink) {
                 val buf = okio.Buffer()
-                // FIX #4: was okio.Okio.source(tempFile) — now extension function tempFile.source()
+                // FIX #4: was okio.Okio.source(tempFile) â€” now extension function tempFile.source()
                 val src = tempFile.source()
                 val total = tempFile.length()
                 var uploaded = 0L
@@ -3492,13 +3492,13 @@ fun generateChatId(mobile1: String, mobile2: String): String =
     if (mobile1 < mobile2) "${mobile1}_${mobile2}" else "${mobile2}_${mobile1}"
 
 fun getFileTypePreview(message: Message): String = when {
-    message.isDeleted -> "🚫 This message was deleted"
-    message.isCallLog -> "${if (message.callType == "video") "📹" else "📞"} ${message.text}"
-    message.fileType?.startsWith("image/") == true -> "📷 Photo"
-    message.fileType?.startsWith("video/") == true -> "🎥 Video"
-    message.fileType?.startsWith("audio/") == true -> "🎤 Voice message"
-    message.fileType?.contains("pdf") == true -> "📄 ${message.fileName ?: "PDF"}"
-    message.fileUrl != null -> "📎 ${message.fileName ?: "Document"}"
+    message.isDeleted -> "ðŸš« This message was deleted"
+    message.isCallLog -> "${if (message.callType == "video") "ðŸ“¹" else "ðŸ“ž"} ${message.text}"
+    message.fileType?.startsWith("image/") == true -> "ðŸ“· Photo"
+    message.fileType?.startsWith("video/") == true -> "ðŸŽ¥ Video"
+    message.fileType?.startsWith("audio/") == true -> "ðŸŽ¤ Voice message"
+    message.fileType?.contains("pdf") == true -> "ðŸ“„ ${message.fileName ?: "PDF"}"
+    message.fileUrl != null -> "ðŸ“Ž ${message.fileName ?: "Document"}"
     else -> message.text
 }
 
@@ -3565,5 +3565,3 @@ fun getVideoCapturer(context: Context): VideoCapturer? = try {
     } catch (_: Exception) { null }
 }
 
-// Extension to handle MaterialTheme.bodySmall
-private val MaterialTheme.bodySmall get() = typography.bodySmall
