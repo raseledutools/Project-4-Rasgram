@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.ContactsContract
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -248,8 +249,13 @@ fun RasGramApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE) }
 
+    val auth = remember { FirebaseAuth.getInstance() }
     var isLoggedIn by remember {
-        mutableStateOf(prefs.getString(PREF_MOBILE, null) != null && prefs.getString(PREF_UID, null) != null)
+        mutableStateOf(
+            auth.currentUser != null &&
+            prefs.getString(PREF_MOBILE, null) != null &&
+            prefs.getString(PREF_UID, null) != null
+        )
     }
     var currentUser by remember {
         mutableStateOf(
@@ -1023,6 +1029,34 @@ fun ChatsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // ─── Contact Sync (WhatsApp style) ───────────────────────────────────────
+    var deviceContactNumbers by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var contactsPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS)
+                == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        contactsPermissionGranted = granted
+        if (granted) {
+            deviceContactNumbers = getDeviceContactNumbers(context)
+        }
+    }
+
+    // Permission check + load contacts on first open
+    LaunchedEffect(contactsPermissionGranted) {
+        if (contactsPermissionGranted) {
+            deviceContactNumbers = getDeviceContactNumbers(context)
+        } else {
+            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Real-time users
     LaunchedEffect(Unit) {
         db.collection("chat_users").addSnapshotListener { snapshot, _ ->
@@ -1080,8 +1114,18 @@ fun ChatsTab(
         }
     }
 
-    val filteredUsers = users.filter {
-        it.name.contains(searchQuery, ignoreCase = true) || it.mobile.contains(searchQuery)
+    // WhatsApp style: শুধু phonebook contacts যারা RasGram-এ আছে
+    val filteredUsers = users.filter { user ->
+        val isInPhonebook = if (deviceContactNumbers.isEmpty()) {
+            // Permission না পেলে সব users দেখাও (fallback)
+            true
+        } else {
+            deviceContactNumbers.contains(user.mobile)
+        }
+        isInPhonebook && (
+            user.name.contains(searchQuery, ignoreCase = true) ||
+            user.mobile.contains(searchQuery)
+        )
     }.sortedWith(compareByDescending<User> { latestMessages[it.mobile]?.timestamp ?: 0L })
 
     Column(modifier = modifier.fillMaxHeight().background(RasGramTheme.DarkBackground)) {
@@ -1115,9 +1159,17 @@ fun ChatsTab(
                     ) {
                         Icon(Icons.Default.PersonAddAlt, null, modifier = Modifier.size(64.dp), tint = RasGramTheme.TextMuted.copy(0.4f))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("No contacts yet", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyLarge)
+                        Text("No contacts on RasGram", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Other users who sign up will appear here.", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Text(
+                            if (deviceContactNumbers.isEmpty())
+                                "Allow contacts permission to see your phonebook contacts who use RasGram."
+                            else
+                                "None of your phonebook contacts are on RasGram yet. Invite them!",
+                            color = RasGramTheme.TextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
@@ -3555,6 +3607,48 @@ fun isCompactScreen(): Boolean {
     return configuration.screenWidthDp < 600
 }
 
+
+// ==================== CONTACT SYNC HELPERS ====================
+
+/**
+ * Device এর phonebook থেকে সব phone number পড়ে নেয়
+ */
+fun getDeviceContactNumbers(context: Context): Set<String> {
+    val numbers = mutableSetOf<String>()
+    try {
+        val cursor = context.contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+            null, null, null
+        )
+        cursor?.use {
+            val col = it.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (it.moveToNext()) {
+                val raw = it.getString(col) ?: continue
+                val normalized = normalizeNumber(raw)
+                if (normalized.isNotEmpty()) numbers.add(normalized)
+            }
+        }
+    } catch (_: Exception) { }
+    return numbers
+}
+
+/**
+ * Phone number normalize করে Firebase format এ আনে
+ * Bangladesh: 01XXXXXXXXX → 8801XXXXXXXXX
+ */
+fun normalizeNumber(raw: String): String {
+    val digits = raw.replace(Regex("[^0-9]"), "")
+    return when {
+        digits.startsWith("880") && digits.length >= 12 -> digits
+        digits.startsWith("0") && digits.length == 11 -> "880${digits.substring(1)}"
+        digits.length == 10 && digits.startsWith("1") -> "880$digits"
+        else -> digits.takeLast(11).let { tail ->
+            if (tail.startsWith("1") && tail.length == 11) "880${tail.substring(1)}"
+            else digits
+        }
+    }
+}
 fun getVideoCapturer(context: Context): VideoCapturer? = try {
     val e2 = Camera2Enumerator(context)
     e2.deviceNames.firstOrNull { e2.isFrontFacing(it) }?.let { e2.createCapturer(it, null) }
