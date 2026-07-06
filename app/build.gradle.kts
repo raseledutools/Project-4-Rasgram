@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // Compose plugin version Kotlin version (2.1.10) এর সাথে মিল থাকতে হবে
+    // Compose plugin version Kotlin version (2.1.10) à¦à¦° à¦¸à¦¾à¦¥à§‡ à¦®à¦¿à¦² à¦¥à¦¾à¦•à¦¤à§‡ à¦¹à¦¬à§‡
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.10"
     id("com.google.gms.google-services") version "4.4.2"
 }
@@ -23,11 +23,11 @@ android {
         }
 
         ndk {
-            // শুধু মাত্র আধুনিক ফোনগুলোর জন্য বিল্ড করবে, এতে APK সাইজ অনেক কমে যাবে
+            // à¦¶à§à¦§à§ à¦®à¦¾à¦¤à§à¦° à¦†à¦§à§à¦¨à¦¿à¦• à¦«à§‹à¦¨à¦—à§à¦²à§‹à¦° à¦œà¦¨à§à¦¯ à¦¬à¦¿à¦²à§à¦¡ à¦•à¦°à¦¬à§‡, à¦à¦¤à§‡ APK à¦¸à¦¾à¦‡à¦œ à¦…à¦¨à§‡à¦• à¦•à¦®à§‡ à¦¯à¦¾à¦¬à§‡
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
-        // 🔥 PRO TIP: লাইব্রেরিগুলো থেকে অপ্রয়োজনীয় ভাষা ডিলিট করে শুধু ইংরেজি ও বাংলা রাখবে। এতে প্রায় ১-২ MB সাইজ কমবে।
+        // ðŸ”¥ PRO TIP: à¦²à¦¾à¦‡à¦¬à§à¦°à§‡à¦°à¦¿à¦—à§à¦²à§‹ à¦¥à§‡à¦•à§‡ à¦…à¦ªà§à¦°à§Ÿà§‹à¦œà¦¨à§€à§Ÿ à¦­à¦¾à¦·à¦¾ à¦¡à¦¿à¦²à¦¿à¦Ÿ à¦•à¦°à§‡ à¦¶à§à¦§à§ à¦‡à¦‚à¦°à§‡à¦œà¦¿ à¦“ à¦¬à¦¾à¦‚à¦²à¦¾ à¦°à¦¾à¦–à¦¬à§‡à¥¤ à¦à¦¤à§‡ à¦ªà§à¦°à¦¾à§Ÿ à§§-à§¨ MB à¦¸à¦¾à¦‡à¦œ à¦•à¦®à¦¬à§‡à¥¤
         resourceConfigurations += listOf("en", "bn")
     }
 
@@ -97,11 +97,11 @@ dependencies {
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 
-    // ─── Core Android ────────────────────────────────────────────────────────
+    // â”€â”€â”€ Core Android â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
-    // ─── Compose ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€ Compose â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
@@ -117,53 +117,54 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.runtime:runtime")
     
-    // 🔥 FIX: material-icons-extended রিমুভ করা হয়েছে। এটি ৩-৪ MB সাইজ খায়। 
-    // যে আইকনগুলো লাগবে সেগুলো Google Fonts থেকে SVG ডাউনলোড করে res/drawable এ অ্যাড করে নিবেন।
+    // ðŸ”¥ FIX: material-icons-extended à¦°à¦¿à¦®à§à¦­ à¦•à¦°à¦¾ à¦¹à§Ÿà§‡à¦›à§‡à¥¤ à¦à¦Ÿà¦¿ à§©-à§ª MB à¦¸à¦¾à¦‡à¦œ à¦–à¦¾à§Ÿà¥¤ 
+    // à¦¯à§‡ à¦†à¦‡à¦•à¦¨à¦—à§à¦²à§‹ à¦²à¦¾à¦—à¦¬à§‡ à¦¸à§‡à¦—à§à¦²à§‹ Google Fonts à¦¥à§‡à¦•à§‡ SVG à¦¡à¦¾à¦‰à¦¨à¦²à§‹à¦¡ à¦•à¦°à§‡ res/drawable à¦ à¦…à§à¦¯à¦¾à¦¡ à¦•à¦°à§‡ à¦¨à¦¿à¦¬à§‡à¦¨à¥¤
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
 
-    // ─── Image Loading ────────────────────────────────────────────────────────
+    // â”€â”€â”€ Image Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     implementation("io.coil-kt.coil3:coil:3.0.4")
 
-    // ─── File Picker ──────────────────────────────────────────────────────────
+    // â”€â”€â”€ File Picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     implementation("androidx.documentfile:documentfile:1.0.1")
 
-    // ─── CameraX ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€ CameraX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     val cameraxVersion = "1.4.0"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
-    // ─── Firebase ────────────────────────────────────────────────────────────
+    // â”€â”€â”€ Firebase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
-    // 🔥 FIX: Analytics রিমুভ করা হয়েছে পারফরম্যান্স বুস্ট এবং সাইজ কমানোর জন্য
+    // ðŸ”¥ FIX: Analytics à¦°à¦¿à¦®à§à¦­ à¦•à¦°à¦¾ à¦¹à§Ÿà§‡à¦›à§‡ à¦ªà¦¾à¦°à¦«à¦°à¦®à§à¦¯à¦¾à¦¨à§à¦¸ à¦¬à§à¦¸à§à¦Ÿ à¦à¦¬à¦‚ à¦¸à¦¾à¦‡à¦œ à¦•à¦®à¦¾à¦¨à§‹à¦° à¦œà¦¨à§à¦¯
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
     
-    // Firebase Cloud Messaging (FCM) - নোটিফিকেশনের জন্য আগের ধাপে বলেছিলাম
+    // Firebase Cloud Messaging (FCM) - à¦¨à§‹à¦Ÿà¦¿à¦«à¦¿à¦•à§‡à¦¶à¦¨à§‡à¦° à¦œà¦¨à§à¦¯ à¦†à¦—à§‡à¦° à¦§à¦¾à¦ªà§‡ à¦¬à¦²à§‡à¦›à¦¿à¦²à¦¾à¦®
     implementation("com.google.firebase:firebase-messaging-ktx")
     
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
-    // ─── ML Kit ──────────────────────────────────────────────────────────────
-    // 🔥 FIX: চ্যাট অ্যাপে Barcode বা Text Recognition দরকার নেই। 
-    // এগুলো প্রায় ১০-১৫ MB সাইজ নিয়ে নিচ্ছিল। তাই বাদ দেওয়া হলো।
+    // â”€â”€â”€ ML Kit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ðŸ”¥ FIX: à¦šà§à¦¯à¦¾à¦Ÿ à¦…à§à¦¯à¦¾à¦ªà§‡ Barcode à¦¬à¦¾ Text Recognition à¦¦à¦°à¦•à¦¾à¦° à¦¨à§‡à¦‡à¥¤ 
+    // à¦à¦—à§à¦²à§‹ à¦ªà§à¦°à¦¾à§Ÿ à§§à§¦-à§§à§« MB à¦¸à¦¾à¦‡à¦œ à¦¨à¦¿à§Ÿà§‡ à¦¨à¦¿à¦šà§à¦›à¦¿à¦²à¥¤ à¦¤à¦¾à¦‡ à¦¬à¦¾à¦¦ à¦¦à§‡à¦“à§Ÿà¦¾ à¦¹à¦²à§‹à¥¤
     // implementation("com.google.mlkit:barcode-scanning:17.3.0")
     // implementation("com.google.mlkit:text-recognition:16.0.1")
 
-    // ─── WebRTC (~15MB) ─────────────────────────
-    // ভিডিও বা অডিও কলের জন্য এটি মাস্ট লাগবে, তাই এটি রাখা হলো। 
+    // â”€â”€â”€ WebRTC (~15MB) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // à¦­à¦¿à¦¡à¦¿à¦“ à¦¬à¦¾ à¦…à¦¡à¦¿à¦“ à¦•à¦²à§‡à¦° à¦œà¦¨à§à¦¯ à¦à¦Ÿà¦¿ à¦®à¦¾à¦¸à§à¦Ÿ à¦²à¦¾à¦—à¦¬à§‡, à¦¤à¦¾à¦‡ à¦à¦Ÿà¦¿ à¦°à¦¾à¦–à¦¾ à¦¹à¦²à§‹à¥¤ 
     implementation("io.getstream:stream-webrtc-android:1.1.1")
     
-    // Push Notification এর জন্য OkHttp
+    // Push Notification à¦à¦° à¦œà¦¨à§à¦¯ OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
-    // FCM v1 API এর Access Token জেনারেট করার জন্য
+    // FCM v1 API à¦à¦° Access Token à¦œà§‡à¦¨à¦¾à¦°à§‡à¦Ÿ à¦•à¦°à¦¾à¦° à¦œà¦¨à§à¦¯
     implementation("com.google.auth:google-auth-library-oauth2-http:1.19.0")
 
-    // ─── Testing ──────────────────────────────────────────────────────────────
+    // â”€â”€â”€ Testing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
