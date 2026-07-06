@@ -357,64 +357,38 @@ fun OtpLoginScreen(onLogin: (User) -> Unit) {
         isLoading = true
         errorMsg = ""
 
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                scope.launch {
-                    try {
-                        val result = auth.signInWithCredential(credential).await()
-                        val uid = result.user?.uid ?: return@launch
-                        val mobile = fullPhone.replace("+", "").replace(" ", "")
-                        val docRef = db.collection("chat_users").document(mobile)
-                        val snap = docRef.get().await()
-                        if (!snap.exists()) {
-                            docRef.set(hashMapOf(
-                                "uid" to uid, "name" to userName, "mobile" to mobile,
-                                "avatarUrl" to "", "lastActive" to System.currentTimeMillis(),
-                                "typingTo" to null, "statusVisible" to true,
-                                "about" to "Hey there! I am using RasGram."
-                            )).await()
-                        } else {
-                            docRef.update("lastActive", System.currentTimeMillis(), "uid", uid)
-                        }
-                        val savedName = snap.getString("name") ?: userName
-                        // Save FCM token after login
-                        try {
-                            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { fcmToken ->
-                                db.collection("chat_users").document(mobile).update("fcmToken", fcmToken)
-                            }
-                        } catch (_: Exception) { }
-                        onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
-                    } catch (e: Exception) {
-                        errorMsg = "Auto-verification failed: ${e.message}"
-                        isLoading = false
-                    }
+        // BYPASS FIREBASE AUTH (For testing)
+        scope.launch {
+            try {
+                val uid = "user_${fullPhone.replace("+", "").replace(" ", "")}"
+                val mobile = fullPhone.replace("+", "").replace(" ", "")
+                val docRef = db.collection("chat_users").document(mobile)
+                val snap = docRef.get().await()
+                if (!snap.exists()) {
+                    docRef.set(hashMapOf(
+                        "uid" to uid, "name" to userName, "mobile" to mobile,
+                        "avatarUrl" to "", "lastActive" to System.currentTimeMillis(),
+                        "typingTo" to null, "statusVisible" to true,
+                        "about" to "Hey there! I am using RasGram."
+                    )).await()
+                } else {
+                    docRef.update("lastActive", System.currentTimeMillis(), "uid", uid).await()
                 }
-            }
-
-            override fun onVerificationFailed(e: FirebaseException) {
-                errorMsg = "Verification failed: ${e.message}"
+                val savedName = snap.getString("name") ?: userName
+                
+                // Save FCM token after login
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { fcmToken ->
+                        db.collection("chat_users").document(mobile).update("fcmToken", fcmToken)
+                    }
+                } catch (_: Exception) { }
+                
+                onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
+            } catch (e: Exception) {
+                errorMsg = "Login failed: ${e.message}"
                 isLoading = false
             }
-
-            override fun onCodeSent(vId: String, token: PhoneAuthProvider.ForceResendingToken) {
-                verificationId = vId
-                resendToken = token
-                isLoading = false
-                step = 2
-            }
         }
-
-        val optionsBuilder = PhoneAuthOptions.newBuilder(auth)
-            .setPhoneNumber(fullPhone)
-            .setTimeout(60L, TimeUnit.SECONDS)
-            .setActivity(context as ComponentActivity)
-            .setCallbacks(callbacks)
-
-        if (forceResend && resendToken != null) {
-            optionsBuilder.setForceResendingToken(resendToken!!)
-        }
-
-        PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
     }
 
     fun verifyOtp() {
