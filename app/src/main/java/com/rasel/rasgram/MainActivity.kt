@@ -784,6 +784,37 @@ fun MainScreen(
     onLogout: () -> Unit,
     onUserUpdate: (User) -> Unit
 ) {
+    val context = LocalContext.current
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    // Request permissions dynamically
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+    }
+
+    // Listen for incoming calls when app is open (e.g. from Web version)
+    LaunchedEffect(currentUser.mobile) {
+        db.collection("calls")
+            .whereEqualTo("callee", currentUser.mobile)
+            .whereEqualTo("status", "calling")
+            .addSnapshotListener { snapshot, _ ->
+                snapshot?.documentChanges?.forEach { change ->
+                    if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                        val data = change.document.data
+                        val intent = Intent(context, MainActivity::class.java).apply {
+                            action = "ACTION_INCOMING_CALL"
+                            putExtra("callId", change.document.id)
+                            putExtra("callerMobile", data["caller"] as? String ?: "")
+                            putExtra("callerName", data["callerName"] as? String ?: "")
+                            putExtra("callType", data["type"] as? String ?: "audio")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                        context.startActivity(intent)
+                    }
+                }
+            }
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedContact by remember { mutableStateOf<User?>(null) }
     var selectedGroup by remember { mutableStateOf<Group?>(null) }
