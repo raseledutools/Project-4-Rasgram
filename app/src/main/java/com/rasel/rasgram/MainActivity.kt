@@ -377,6 +377,12 @@ fun OtpLoginScreen(onLogin: (User) -> Unit) {
                             docRef.update("lastActive", System.currentTimeMillis(), "uid", uid)
                         }
                         val savedName = snap.getString("name") ?: userName
+                        // Save FCM token after login
+                        try {
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { fcmToken ->
+                                db.collection("chat_users").document(mobile).update("fcmToken", fcmToken)
+                            }
+                        } catch (_: Exception) { }
                         onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
                     } catch (e: Exception) {
                         errorMsg = "Auto-verification failed: ${e.message}"
@@ -438,6 +444,12 @@ fun OtpLoginScreen(onLogin: (User) -> Unit) {
                     docRef.update("lastActive", System.currentTimeMillis(), "uid", uid)
                 }
                 val savedName = snap.getString("name") ?: userName
+                // Save FCM token after OTP login
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { fcmToken ->
+                        db.collection("chat_users").document(mobile).update("fcmToken", fcmToken)
+                    }
+                } catch (_: Exception) { }
                 onLogin(User(uid = uid, name = savedName, mobile = mobile, avatarUrl = snap.getString("avatarUrl") ?: ""))
             } catch (e: Exception) {
                 errorMsg = "Invalid OTP. Please try again."
@@ -3025,6 +3037,15 @@ fun CallingScreen(
                                         "timestamp" to System.currentTimeMillis(),
                                         "offer" to mapOf("type" to s.type.canonicalForm(), "sdp" to s.description)
                                     ))
+                                    // Send FCM push to callee so call arrives even if app is closed
+                                    sendFcmCallNotification(
+                                        calleeMobile = contact.mobile,
+                                        callerName = currentUser.name,
+                                        callType = callType,
+                                        callId = callId,
+                                        db = db,
+                                        context = context
+                                    )
                                 }
                             }
                             override fun onCreateFailure(e: String?) {}
@@ -3500,6 +3521,99 @@ fun getFileName(context: Context, uri: Uri): String? = try {
     }
 } catch (_: Exception) { null }
 
+// ==================== FCM CALL NOTIFICATION ====================
+/**
+ * Caller → callee-কে FCM data message পাঠায়
+ * App বন্ধ থাকলেও কাজ করে (high priority data message)
+ */
+suspend fun sendFcmCallNotification(
+    calleeMobile: String,
+    callerName: String,
+    callType: String,
+    callId: String,
+    db: FirebaseFirestore,
+    context: Context
+) = withContext(Dispatchers.IO) {
+    try {
+        // Get callee FCM token from Firestore
+        val calleeDoc = db.collection("chat_users").document(calleeMobile).get().await()
+        val fcmToken = calleeDoc.getString("fcmToken") ?: return@withContext
+
+        // Read service account from assets
+        val saStream = context.resources.openRawResource(
+            context.resources.getIdentifier("service_account", "raw", context.packageName)
+        )
+        val saJson = org.json.JSONObject(saStream.bufferedReader().readText())
+
+        // Get OAuth2 access token for FCM v1 API
+        val privateKeyPem = saJson.getString("private_key")
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace("\\n", "")
+            .replace("\n", "")
+            .trim()
+        val keyBytes = android.util.Base64.decode(privateKeyPem, android.util.Base64.DEFAULT)
+        val keySpec = java.security.spec.PKCS8EncodedKeySpec(keyBytes)
+        val privateKey = java.security.KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+
+        val projectId = saJson.getString("project_id")
+        val clientEmail = saJson.getString("client_email")
+        val now = System.currentTimeMillis() / 1000
+        val scope = "https://www.googleapis.com/auth/firebase.messaging"
+
+        // Build JWT
+        val header = android.util.Base64.encodeToString(
+            """{"alg":"RS256","typ":"JWT"}""".toByteArray(), android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+        )
+        val claims = android.util.Base64.encodeToString(
+            """{"iss":"$clientEmail","scope":"$scope","aud":"https://oauth2.googleapis.com/token","iat":$now,"exp":${now + 3600}}""".toByteArray(),
+            android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+        )
+        val toSign = "$header.$claims"
+        val signer = java.security.Signature.getInstance("SHA256withRSA")
+        signer.initSign(privateKey)
+        signer.update(toSign.toByteArray())
+        val sig = android.util.Base64.encodeToString(signer.sign(), android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE)
+        val jwt = "$toSign.$sig"
+
+        // Exchange JWT for access token
+        val client = okhttp3.OkHttpClient()
+        val tokenReq = okhttp3.Request.Builder()
+            .url("https://oauth2.googleapis.com/token")
+            .post(okhttp3.FormBody.Builder()
+                .add("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+                .add("assertion", jwt).build())
+            .build()
+        val tokenResp = client.newCall(tokenReq).execute()
+        val accessToken = org.json.JSONObject(tokenResp.body?.string() ?: "").optString("access_token")
+        if (accessToken.isEmpty()) return@withContext
+
+        // Send FCM data message (high priority - works even when app is killed)
+        val fcmPayload = org.json.JSONObject().apply {
+            put("message", org.json.JSONObject().apply {
+                put("token", fcmToken)
+                put("data", org.json.JSONObject().apply {
+                    put("type", "incoming_call")
+                    put("callerName", callerName)
+                    put("callerMobile", android.util.Base64.encodeToString(callerName.toByteArray(), android.util.Base64.NO_WRAP))
+                    put("callType", callType)
+                    put("callId", callId)
+                })
+                put("android", org.json.JSONObject().apply {
+                    put("priority", "HIGH")
+                })
+            })
+        }.toString()
+
+        val fcmReq = okhttp3.Request.Builder()
+            .url("https://fcm.googleapis.com/v1/projects/$projectId/messages:send")
+            .addHeader("Authorization", "Bearer $accessToken")
+            .addHeader("Content-Type", "application/json")
+            .post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), fcmPayload))
+            .build()
+        client.newCall(fcmReq).execute()
+    } catch (_: Exception) { }
+}
 // ==================== SEND MESSAGE ====================
 fun sendMessage(
     db: FirebaseFirestore,
