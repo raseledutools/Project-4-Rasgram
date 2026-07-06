@@ -7,10 +7,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -19,10 +23,32 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Generate Keystore if not exists
+        run: |
+          if [ ! -f "app/release.keystore" ]; then
+            echo "Generating release.keystore..."
+            keytool -genkey -v -keystore app/release.keystore -alias rasgram -keyalg RSA -keysize 2048 -validity 10000 -storepass rasgram123 -keypass rasgram123 -dname "CN=Rasel, OU=Dev, O=Rasgram, L=Dhaka, ST=Dhaka, C=BD"
+            
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add app/release.keystore
+            git commit -m "chore: add release keystore for consistent signing"
+            git push
+          else
+            echo "release.keystore already exists."
+          fi
+
+      - name: Print Keystore Fingerprints
+        run: |
+          echo "=================================================="
+          echo "FINGERPRINTS FOR FIREBASE CONSOLE:"
+          keytool -list -v -keystore app/release.keystore -alias rasgram -storepass rasgram123 -keypass rasgram123 | grep -E "(SHA1:|SHA256:)"
+          echo "=================================================="
+
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      - name: Build Release APK (minified, optimized)
+      - name: Build Release APK
         run: ./gradlew clean assembleRelease
 
       - name: Upload Release APK
