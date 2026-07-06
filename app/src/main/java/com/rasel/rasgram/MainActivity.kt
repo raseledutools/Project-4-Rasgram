@@ -823,7 +823,6 @@ fun MainScreen(
     var callContact by remember { mutableStateOf<User?>(null) }
     var liveCurrentUser by remember { mutableStateOf(currentUser) }
     val isCompact = isCompactScreen()
-    val db = remember { FirebaseFirestore.getInstance() }
 
     // Keep user online + sync profile
     LaunchedEffect(currentUser.mobile) {
