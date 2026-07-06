@@ -1690,13 +1690,14 @@ fun ChatArea(
                 }
             }
 
-            // FIX #5: AnimatedVisibility wrapped in Box to avoid ColumnScope implicit receiver error
+            // Scroll-to-bottom FAB - inside Box(weight(1f)) BoxScope, using wrapContentSize
             val showScrollFab by remember { derivedStateOf { listState.firstVisibleItemIndex < messages.size - 5 && messages.size > 10 } }
-            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
-                AnimatedVisibility(
-                    visible = showScrollFab,
-                    enter = fadeIn() + scaleIn(),
-                    exit = fadeOut() + scaleOut()
+            if (showScrollFab) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 16.dp, end = 16.dp),
+                    contentAlignment = Alignment.BottomEnd
                 ) {
                     FloatingActionButton(
                         onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
