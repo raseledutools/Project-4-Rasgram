@@ -359,9 +359,6 @@ fun RasGramApp() {
                         .putString(PREF_NAME_KEY, updated.name)
                         .putString(PREF_AVATAR, updated.avatarUrl)
                         .apply()
-                },
-                onStatusClick = { statuses ->
-                    selectedStatusUser = statuses
                 }
             )
         }
@@ -834,8 +831,7 @@ fun MainScreen(
     isDarkMode: Boolean,
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit,
-    onUserUpdate: (User) -> Unit,
-    onStatusClick: (List<Status>) -> Unit
+    onUserUpdate: (User) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
