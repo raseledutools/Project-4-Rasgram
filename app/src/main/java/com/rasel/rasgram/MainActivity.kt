@@ -359,6 +359,9 @@ fun RasGramApp() {
                         .putString(PREF_NAME_KEY, updated.name)
                         .putString(PREF_AVATAR, updated.avatarUrl)
                         .apply()
+                },
+                onStatusClick = { statuses ->
+                    selectedStatusUser = statuses
                 }
             )
         }
@@ -831,7 +834,8 @@ fun MainScreen(
     isDarkMode: Boolean,
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit,
-    onUserUpdate: (User) -> Unit
+    onUserUpdate: (User) -> Unit,
+    onStatusClick: (List<Status>) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
@@ -1064,7 +1068,7 @@ fun SidebarContent(
             onUserUpdate = onUserUpdate,
             modifier = modifier
         )
-        1 -> StatusTab(currentUser = currentUser, modifier = modifier)
+        1 -> StatusTab(currentUser = currentUser, onStatusClick = onStatusClick, modifier = modifier)
         2 -> CallsTab(currentUser = currentUser, modifier = modifier)
         3 -> GroupsTab(currentUser = currentUser, onGroupSelect = onGroupSelect, modifier = modifier)
     }
@@ -1883,29 +1887,6 @@ fun ChatArea(
     }
 }
 
-@Composable
-fun EncryptionNotice() {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = Color(0xFF182229)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Lock, null, modifier = Modifier.size(12.dp), tint = RasGramTheme.Yellow)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                "Messages are end-to-end encrypted.",
-                style = MaterialTheme.typography.bodySmall,
-                color = RasGramTheme.Yellow,
-                fontSize = 11.sp
-            )
-        }
-    }
-}
 
 @Composable
 fun DateDivider(dateString: String) {
@@ -2454,7 +2435,7 @@ fun CallLogBubble(message: Message) {
                     tint = if (message.callStatus == "missed") RasGramTheme.Red else RasGramTheme.Green
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(decryptedText, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
+                Text(message.text, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(message.timeString, style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted, fontSize = 10.sp)
             }
@@ -2746,6 +2727,10 @@ fun StatusTab(currentUser: User, onStatusClick: (List<Status>) -> Unit, modifier
             }
         }
 
+        val myStatuses = statuses.filter { it.userMobile == currentUser.mobile }
+        val othersStatuses = statuses.filter { it.userMobile != currentUser.mobile }
+            .groupBy { it.userMobile }
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             // My status
             item {
@@ -2762,10 +2747,6 @@ fun StatusTab(currentUser: User, onStatusClick: (List<Status>) -> Unit, modifier
                 )
                 HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
             }
-
-            val myStatuses = statuses.filter { it.userMobile == currentUser.mobile }
-            val othersStatuses = statuses.filter { it.userMobile != currentUser.mobile }
-                .groupBy { it.userMobile }
 
             if (othersStatuses.isNotEmpty()) {
                 item {
@@ -3688,9 +3669,12 @@ fun sendMessage(
     replyToSender: String? = null,
     duration: Int = 0
 ) {
+    val encryptedText = AESCrypto.encrypt(chatId, text)
+    val encryptedReply = replyToText?.let { AESCrypto.encrypt(chatId, it) }
+
     val now = System.currentTimeMillis()
     val message = hashMapOf(
-        "text" to text,
+        "text" to encryptedText,
         "senderMobile" to senderMobile,
         "receiverMobile" to receiverMobile,
         "timestamp" to now,
