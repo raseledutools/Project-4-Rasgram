@@ -1425,6 +1425,25 @@ fun ContactItem(
     }
 }
 
+@Composable
+fun EncryptionNotice() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            color = Color(0xFF1E2B30),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Messages and calls are end-to-end encrypted.", color = Color(0xFFFFD54F), fontSize = 11.sp, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
 // ==================== CHAT AREA ====================
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1441,7 +1460,7 @@ fun ChatArea(
 
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var inputText by remember { mutableStateOf("") }
-    var liveGroup by remember { mutableStateOf(group) }
+    var liveContact by remember { mutableStateOf(contact) }
     var isUploading by remember { mutableStateOf(false) }
     var uploadProgress by remember { mutableFloatStateOf(0f) }
     var replyToMessage by remember { mutableStateOf<Message?>(null) }
@@ -3655,7 +3674,7 @@ fun sendMessage(
         "isForwarded" to false,
         "isStarred" to false,
         "replyToId" to replyToId,
-        "replyToText" to encryptedReplyText,
+        "replyToText" to AESCrypto.decrypt(chatId, message.replyToText ?: ""),
         "replyToSender" to replyToSender,
         "duration" to duration
     )
@@ -3783,25 +3802,9 @@ fun getVideoCapturer(context: Context): VideoCapturer? = try {
 }
 
 
-@Composable
-fun EncryptionNotice() {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            color = Color(0xFF1E2B30),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Messages and calls are end-to-end encrypted.", color = Color(0xFFFFD54F), fontSize = 11.sp, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
+
 // ==================== GROUP CHAT AREA ====================
+@Composable
 fun GroupChatArea(
     currentUser: User,
     group: Group,
@@ -4200,470 +4203,4 @@ fun GroupChatArea(
 @Composable
 
 
-@Composable
-fun EncryptionNotice() {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            color = Color(0xFF1E2B30),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Messages and calls are end-to-end encrypted.", color = Color(0xFFFFD54F), fontSize = 11.sp, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
-// ==================== GROUP CHAT AREA ====================
-fun GroupChatArea(
-    currentUser: User,
-    group: Group,
-    onBack: () -> Unit,
-    onCallClick: (String) -> Unit
-) {
-    val db = remember { FirebaseFirestore.getInstance() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val isCompact = isCompactScreen()
 
-    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
-    var inputText by remember { mutableStateOf("") }
-    var liveGroup by remember { mutableStateOf(group) }
-    var isUploading by remember { mutableStateOf(false) }
-    var uploadProgress by remember { mutableFloatStateOf(0f) }
-    var replyToMessage by remember { mutableStateOf<Message?>(null) }
-    var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showAttachMenu by remember { mutableStateOf(false) }
-    var isRecording by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableIntStateOf(0) }
-    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
-    var recordingFile by remember { mutableStateOf<File?>(null) }
-    val listState = rememberLazyListState()
-    val haptic = LocalHapticFeedback.current
-
-    val chatId = group.id
-
-    // File launchers
-    val imageVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            isUploading = true
-            scope.launch {
-                try {
-                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
-                    if (url != null) {
-                        sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName, fileType)
-                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-                isUploading = false
-                uploadProgress = 0f
-            }
-        }
-    }
-
-    val docLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            isUploading = true
-            scope.launch {
-                try {
-                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
-                    if (url != null) {
-                        sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName, fileType)
-                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-                isUploading = false
-                uploadProgress = 0f
-            }
-        }
-    }
-
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-        if (perms[Manifest.permission.RECORD_AUDIO] == true) {
-            // Start recording
-        }
-    }
-
-    // Load messages with real-time listener
-    LaunchedEffect(chatId) {
-        db.collection("pvt_msg_$chatId")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                snapshot?.let { qs ->
-                    messages = qs.documents.mapNotNull { doc ->
-                        doc.data?.let { d ->
-                            Message(
-                                id = doc.id,
-                                text = AESCrypto.decrypt(chatId, d["text"] as? String ?: ""),
-                                senderMobile = d["senderMobile"] as? String ?: "",
-                                receiverMobile = d["receiverMobile"] as? String ?: "",
-                                timestamp = d["timestamp"] as? Long ?: 0,
-                                timeString = d["timeString"] as? String ?: "",
-                                fileUrl = d["fileUrl"] as? String,
-                                fileName = d["fileName"] as? String,
-                                fileType = d["fileType"] as? String,
-                                fileSizeBytes = d["fileSizeBytes"] as? Long ?: 0,
-                                reaction = d["reaction"] as? String,
-                                read = d["read"] as? Boolean ?: false,
-                                delivered = d["delivered"] as? Boolean ?: false,
-                                isCallLog = d["isCallLog"] as? Boolean ?: false,
-                                callStatus = d["callStatus"] as? String,
-                                callType = d["callType"] as? String,
-                                isPending = doc.metadata.hasPendingWrites(),
-                                replyToId = d["replyToId"] as? String,
-                                replyToText = (d["replyToText"] as? String)?.let { AESCrypto.decrypt(chatId, it) },
-                                replyToSender = d["replyToSender"] as? String,
-                                isDeleted = d["isDeleted"] as? Boolean ?: false,
-                                isForwarded = d["isForwarded"] as? Boolean ?: false,
-                                isStarred = d["isStarred"] as? Boolean ?: false,
-                                duration = (d["duration"] as? Long)?.toInt() ?: 0
-                            )
-                        }
-                    }
-                    // Mark as read
-                    qs.documents.filter { doc ->
-                        doc.getString("senderMobile") == group.id && doc.getBoolean("read") == false
-                    }.forEach { doc ->
-                        doc.reference.update("read", true, "delivered", true)
-                    }
-                }
-            }
-    }
-
-    // Contact live status
-    LaunchedEffect(group.id) {
-        db.collection("chat_users").document(group.id).addSnapshotListener { snap, _ ->
-            snap?.data?.let { d ->
-                liveContact = liveContact.copy(
-                    name = d["name"] as? String ?: liveContact.name,
-                    avatarUrl = d["avatarUrl"] as? String ?: liveContact.avatarUrl,
-                    typingTo = d["typingTo"] as? String,
-                    lastActive = d["lastActive"] as? Long ?: 0
-                )
-            }
-        }
-    }
-
-    // Auto scroll to bottom
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-    }
-
-    // Recording timer
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            recordingSeconds = 0
-            while (isRecording) { delay(1000); recordingSeconds++ }
-        }
-    }
-
-    var typingJob by remember { mutableStateOf<Job?>(null) }
-
-    fun sendText() {
-        val text = inputText.trim()
-        if (text.isBlank()) return
-        sendMessage(
-            db, chatId, currentUser.mobile, "", text, null, null, null,
-            replyToMessage?.id, replyToMessage?.text, replyToMessage?.senderMobile
-        )
-        inputText = ""
-        replyToMessage = null
-        typingJob?.cancel()
-        scope.launch { db.collection("chat_users").document(currentUser.mobile).update("typingTo", null) }
-    }
-
-    BackHandler(enabled = selectedMessages.isNotEmpty()) {
-        selectedMessages = emptySet()
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
-        // Header
-        if (selectedMessages.isNotEmpty()) {
-            SelectionHeader(
-                count = selectedMessages.size,
-                onClose = { selectedMessages = emptySet() },
-                onDelete = {
-                    scope.launch {
-                        selectedMessages.forEach { id ->
-                            db.collection("pvt_msg_$chatId").document(id).update("isDeleted", true, "text", "")
-                        }
-                        selectedMessages = emptySet()
-                    }
-                },
-                onForward = { /* Forward logic */ },
-                onStar = {
-                    scope.launch {
-                        selectedMessages.forEach { id ->
-                            db.collection("pvt_msg_$chatId").document(id).update("isStarred", true)
-                        }
-                        selectedMessages = emptySet()
-                    }
-                },
-                onCopy = {
-                    val text = messages.filter { it.id in selectedMessages }.joinToString("\n") { it.text }
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("messages", text))
-                    selectedMessages = emptySet()
-                }
-            )
-        } else {
-            ChatHeader(
-                contact = liveContact,
-                currentUserMobile = currentUser.mobile,
-                isCompact = isCompact,
-                onBack = onBack,
-                onCallClick = onCallClick,
-                onClearChat = {
-                    scope.launch {
-                        db.collection("pvt_msg_$chatId").get().await().documents.forEach { it.reference.delete() }
-                    }
-                },
-                onViewContact = { /* View contact */ }
-            )
-        }
-
-        // Messages area
-        Box(modifier = Modifier.weight(1f)) {
-            // Chat wallpaper pattern (subtle)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                // subtle background pattern
-            }
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                item {
-                    EncryptionNotice()
-                }
-
-                var lastDateString = ""
-                messages.forEach { message ->
-                    val dateStr = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(Date(message.timestamp))
-                    if (dateStr != lastDateString) {
-                        lastDateString = dateStr
-                        item(key = "date_$dateStr") {
-                            DateDivider(dateStr)
-                        }
-                    }
-                    item(key = message.id) {
-                        MessageBubble(
-                            message = message,
-                            isMe = message.senderMobile == currentUser.mobile,
-                            isSelected = message.id in selectedMessages,
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                selectedMessages = selectedMessages + message.id
-                            },
-                            onClick = {
-                                if (selectedMessages.isNotEmpty()) {
-                                    selectedMessages = if (message.id in selectedMessages)
-                                        selectedMessages - message.id else selectedMessages + message.id
-                                }
-                            },
-                            onReact = { reaction ->
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("reaction", if (message.reaction == reaction) null else reaction)
-                                }
-                            },
-                            onReply = { replyToMessage = message },
-                            onDelete = {
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("isDeleted", true, "text", "")
-                                }
-                            },
-                            onStar = {
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("isStarred", !message.isStarred)
-                                }
-                            },
-                            onCopy = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("message", message.text))
-                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Scroll-to-bottom FAB - inside Box(weight(1f)) BoxScope, using wrapContentSize
-            val showScrollFab by remember { derivedStateOf { listState.firstVisibleItemIndex < messages.size - 5 && messages.size > 10 } }
-            if (showScrollFab) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 16.dp, end = 16.dp),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    FloatingActionButton(
-                        onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
-                        modifier = Modifier.size(40.dp),
-                        containerColor = RasGramTheme.DarkPanel,
-                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                    ) {
-                        Icon(Icons.Default.KeyboardArrowDown, null, tint = RasGramTheme.TextMuted)
-                    }
-                }
-            }
-        }
-
-        // Upload progress
-        if (isUploading) {
-            LinearProgressIndicator(
-                progress = { uploadProgress },
-                modifier = Modifier.fillMaxWidth(),
-                color = RasGramTheme.Green,
-                trackColor = RasGramTheme.DarkPanel
-            )
-        }
-
-        // Reply preview
-        replyToMessage?.let { reply ->
-            ReplyPreview(
-                message = reply,
-                currentUserMobile = currentUser.mobile,
-                onDismiss = { replyToMessage = null }
-            )
-        }
-
-        // Input area
-        ChatInputBar(
-            inputText = inputText,
-            onTextChange = { text ->
-                inputText = text
-                if (text.isNotEmpty()) {
-                    typingJob?.cancel()
-                    // Group typing not supported yet
-                }
-            },
-            onSend = { sendText() },
-            onAttachClick = { showAttachMenu = true },
-            isRecording = isRecording,
-            recordingSeconds = recordingSeconds,
-            onMicPress = {
-                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                if (!hasPerm) {
-                    permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                    return@ChatInputBar
-                }
-                if (!isRecording) {
-                    try {
-                        val file = File(context.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
-                        recordingFile = file
-                        val recorder = MediaRecorder()
-                        recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-                        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        recorder.setOutputFile(file.absolutePath)
-                        recorder.prepare()
-                        recorder.start()
-                        mediaRecorder = recorder
-                        isRecording = true
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Recording error: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
-            onMicRelease = {
-                if (isRecording) {
-                    try {
-                        mediaRecorder?.stop()
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        isRecording = false
-                        val file = recordingFile ?: return@ChatInputBar
-                        if (file.exists() && file.length() > 0) {
-                            isUploading = true
-                            scope.launch {
-                                val (url, fileName, _) = uploadToCloudinary(context, file.toUri()) { prog -> uploadProgress = prog }
-                                if (url != null) {
-                                    sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName ?: "voice.m4a", "audio/mp4", null, null, null, recordingSeconds)
-                                }
-                                isUploading = false
-                                uploadProgress = 0f
-                                file.delete()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        isRecording = false
-                    }
-                }
-            },
-            onMicCancel = {
-                mediaRecorder?.release()
-                mediaRecorder = null
-                isRecording = false
-                recordingFile?.delete()
-            }
-        )
-    }
-
-    // Attachment menu
-    if (showAttachMenu) {
-        AttachmentMenuSheet(
-            onDismiss = { showAttachMenu = false },
-            onImageVideo = { imageVideoLauncher.launch(arrayOf("image/*", "video/*")); showAttachMenu = false },
-            onDocument = { docLauncher.launch(arrayOf("*/*")); showAttachMenu = false },
-            onAudio = { docLauncher.launch(arrayOf("audio/*")); showAttachMenu = false }
-        )
-    }
-}
-
-@Composable
-
-
-// ==================== END TO END ENCRYPTION ====================
-object AESCrypto {
-    private const val ALGORITHM = "AES/CBC/PKCS5Padding"
-    private const val SALT = "RasGram_E2EE_Secret_Salt_2026"
-
-    private fun generateKeyAndIv(chatId: String): Pair<SecretKeySpec, IvParameterSpec> {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest((chatId + SALT).toByteArray(Charsets.UTF_8))
-        
-        val key = ByteArray(16)
-        System.arraycopy(hash, 0, key, 0, 16)
-        
-        val iv = ByteArray(16)
-        System.arraycopy(hash, 16, iv, 0, 16)
-        
-        return Pair(SecretKeySpec(key, "AES"), IvParameterSpec(iv))
-    }
-
-    fun encrypt(chatId: String, text: String): String {
-        if (text.isEmpty()) return text
-        return try {
-            val (keySpec, ivSpec) = generateKeyAndIv(chatId)
-            val cipher = Cipher.getInstance(ALGORITHM)
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
-            val encryptedBytes = cipher.doFinal(text.toByteArray(Charsets.UTF_8))
-            "E2EE:" + android.util.Base64.encodeToString(encryptedBytes, android.util.Base64.NO_WRAP)
-        } catch (e: Exception) { text }
-    }
-
-    fun decrypt(chatId: String, encryptedText: String): String {
-        if (!encryptedText.startsWith("E2EE:")) return encryptedText
-        return try {
-            val (keySpec, ivSpec) = generateKeyAndIv(chatId)
-            val cipher = Cipher.getInstance(ALGORITHM)
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
-            val actualEncrypted = encryptedText.removePrefix("E2EE:")
-            val decodedBytes = android.util.Base64.decode(actualEncrypted, android.util.Base64.NO_WRAP)
-            val decryptedBytes = cipher.doFinal(decodedBytes)
-            String(decryptedBytes, Charsets.UTF_8)
-        } catch (e: Exception) { "🔓 (Decryption failed)" }
-    }
-}
