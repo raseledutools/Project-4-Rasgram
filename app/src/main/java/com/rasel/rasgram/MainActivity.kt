@@ -1,4 +1,4 @@
-package com.rasel.rasgram
+﻿package com.rasel.rasgram
 
 import android.Manifest
 import java.security.MessageDigest
@@ -3998,7 +3998,7 @@ fun GroupChatArea(
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (isCompact) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = RasGramTheme.TextPrimary)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = RasGramTheme.TextPrimary)
                     }
                 }
                 AsyncImage(
@@ -4067,7 +4067,7 @@ fun GroupChatArea(
                 containerColor = RasGramTheme.Green,
                 modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White)
+                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
             }
         }
     }
