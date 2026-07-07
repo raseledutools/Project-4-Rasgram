@@ -594,7 +594,7 @@ fun PhoneInputStep(
     errorMsg: String,
     onNext: () -> Unit
 ) {
-    val countryCodes = listOf("+880" to "ðŸ‡§ðŸ‡© BD", "+1" to "ðŸ‡ºðŸ‡¸ US", "+44" to "ðŸ‡¬ðŸ‡§ UK", "+91" to "ðŸ‡®ðŸ‡³ IN", "+971" to "ðŸ‡¦ðŸ‡ª AE", "+966" to "ðŸ‡¸ðŸ‡¦ SA")
+    val countryCodes = listOf("+880" to "🇧🇩 BD", "+1" to "🇺🇸 US", "+44" to "🇬🇧 UK", "+91" to "🇮🇳 IN", "+971" to "🇦🇪 AE", "+966" to "🇸🇦 SA")
     var showDropdown by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(countryCodes[0]) }
 
@@ -1169,7 +1169,7 @@ fun ChatsTab(
                         doc.data?.let { d ->
                             val msg = Message(
                                 id = doc.id,
-                                text = d["text"] as? String ?: "",
+                                text = AESCrypto.decrypt(chatId, d["text"] as? String ?: "") ?: "",
                                 senderMobile = d["senderMobile"] as? String ?: "",
                                 timestamp = d["timestamp"] as? Long ?: 0,
                                 timeString = d["timeString"] as? String ?: "",
@@ -1453,7 +1453,7 @@ fun ContactItem(
                             )
                         }
                         val previewText = when {
-                            latestMessage?.isDeleted == true -> "ðŸš« This message was deleted"
+                            latestMessage?.isDeleted == true -> "🚫 This message was deleted"
                             latestMessage?.text?.isNotEmpty() == true -> latestMessage.text
                             latestMessage != null -> getFileTypePreview(latestMessage)
                             else -> "Tap to start chatting"
@@ -1572,7 +1572,7 @@ fun ChatArea(
                         doc.data?.let { d ->
                             Message(
                                 id = doc.id,
-                                text = d["text"] as? String ?: "",
+                                text = AESCrypto.decrypt(chatId, d["text"] as? String ?: ""),
                                 senderMobile = d["senderMobile"] as? String ?: "",
                                 receiverMobile = d["receiverMobile"] as? String ?: "",
                                 timestamp = d["timestamp"] as? Long ?: 0,
@@ -1589,7 +1589,7 @@ fun ChatArea(
                                 callType = d["callType"] as? String,
                                 isPending = doc.metadata.hasPendingWrites(),
                                 replyToId = d["replyToId"] as? String,
-                                replyToText = d["replyToText"] as? String,
+                                replyToText = d["replyToText"]?.let { AESCrypto.decrypt(chatId, it as String) },
                                 replyToSender = d["replyToSender"] as? String,
                                 isDeleted = d["isDeleted"] as? Boolean ?: false,
                                 isForwarded = d["isForwarded"] as? Boolean ?: false,
@@ -2247,6 +2247,7 @@ fun MessageBubble(
     message: Message,
     isMe: Boolean,
     isSelected: Boolean,
+    senderName: String? = null,
     onLongClick: () -> Unit,
     onClick: () -> Unit,
     onReact: (String) -> Unit,
@@ -2296,6 +2297,17 @@ fun MessageBubble(
                 shadowElevation = 1.dp
             ) {
                 Column(modifier = Modifier.padding(0.dp)) {
+                    // Sender Name (For Groups)
+                    if (!isMe && senderName != null) {
+                        Text(
+                            senderName,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = RasGramTheme.Yellow,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 0.dp)
+                        )
+                    }
+                    
                     // Reply preview inside bubble
                     message.replyToId?.let {
                         Surface(
@@ -2622,7 +2634,7 @@ fun MessageContextMenu(
             // Emoji reactions
             Surface(shape = RoundedCornerShape(24.dp), color = RasGramTheme.DarkPanel, modifier = Modifier.padding(bottom = 8.dp)) {
                 Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("ðŸ‘", "â¤ï¸", "ðŸ˜‚", "ðŸ˜®", "ðŸ˜¢", "ðŸ™", "ðŸ”¥").forEach { emoji ->
+                    listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { emoji ->
                         Text(
                             emoji,
                             modifier = Modifier.clickable { onReact(emoji) }.padding(4.dp),
@@ -3928,6 +3940,8 @@ fun EncryptionNotice() {
 // ==================== GROUP CHAT AREA ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 fun GroupChatArea(
     currentUser: User,
     group: Group,
@@ -3935,196 +3949,219 @@ fun GroupChatArea(
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val isCompact = isCompactScreen()
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
-    var text by remember { mutableStateOf("") }
+    var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val haptic = LocalHapticFeedback.current
     
+    var isUploading by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableFloatStateOf(0f) }
+    var replyToMessage by remember { mutableStateOf<Message?>(null) }
+    var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showAttachMenu by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableIntStateOf(0) }
+    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var recordingFile by remember { mutableStateOf<File?>(null) }
+
     // Group members cache for name mapping
     var membersMap by remember { mutableStateOf<Map<String, User>>(emptyMap()) }
 
+    // File launchers
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+
     LaunchedEffect(group.id) {
-        // Fetch group members details
         if (group.members.isNotEmpty()) {
-            db.collection("chat_users")
-                .whereIn("mobile", group.members.take(10))
-                .get()
-                .addOnSuccessListener { snap ->
-                    val map = mutableMapOf<String, User>()
-                    snap.documents.forEach { doc ->
-                        doc.data?.let { d ->
-                            val u = User(
-                                uid = doc.id,
-                                name = d["name"] as? String ?: "",
-                                mobile = d["mobile"] as? String ?: "",
-                                avatarUrl = d["avatarUrl"] as? String ?: ""
-                            )
-                            map[u.mobile] = u
-                        }
+            db.collection("chat_users").whereIn("mobile", group.members.take(10)).get().addOnSuccessListener { snap ->
+                val map = mutableMapOf<String, User>()
+                snap.documents.forEach { doc ->
+                    doc.data?.let { d ->
+                        val u = User(
+                            uid = doc.id, name = d["name"] as? String ?: "",
+                            mobile = d["mobile"] as? String ?: "", avatarUrl = d["avatarUrl"] as? String ?: ""
+                        )
+                        map[u.mobile] = u
                     }
-                    membersMap = map
                 }
+                membersMap = map
+            }
         }
 
-        // Listen to messages
         db.collection("groups").document(group.id).collection("messages")
-            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-            .limit(100)
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.ASCENDING)
             .addSnapshotListener { snap, _ ->
                 snap?.documents?.mapNotNull { doc ->
                     doc.data?.let { d ->
                         Message(
                             id = doc.id,
-                            text = d["text"] as? String ?: "",
+                            text = AESCrypto.decrypt(group.id, d["text"] as? String ?: ""),
                             senderMobile = d["senderMobile"] as? String ?: "",
                             receiverMobile = group.id,
                             timestamp = d["timestamp"] as? Long ?: 0,
                             timeString = d["timeString"] as? String ?: "",
                             fileUrl = d["fileUrl"] as? String,
                             fileName = d["fileName"] as? String,
-                            fileType = d["fileType"] as? String
+                            fileType = d["fileType"] as? String,
+                            fileSizeBytes = d["fileSizeBytes"] as? Long ?: 0,
+                            reaction = d["reaction"] as? String,
+                            isDeleted = d["isDeleted"] as? Boolean ?: false,
+                            replyToId = d["replyToId"] as? String,
+                            replyToText = d["replyToText"]?.let { AESCrypto.decrypt(group.id, it as String) },
+                            replyToSender = d["replyToSender"] as? String,
+                            duration = (d["duration"] as? Long)?.toInt() ?: 0
                         )
                     }
-                }?.also { msgs ->
-                    messages = msgs
-                }
+                }?.also { msgs -> messages = msgs }
             }
     }
+
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
+    LaunchedEffect(isRecording) {
+        if (isRecording) { recordingSeconds = 0; while (isRecording) { delay(1000); recordingSeconds++ } }
+    }
+
+    BackHandler(enabled = selectedMessages.isNotEmpty()) { selectedMessages = emptySet() }
 
     Column(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
-        // Top Bar
-        Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel, shadowElevation = 4.dp) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (isCompact) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = RasGramTheme.TextPrimary)
-                    }
-                }
-                AsyncImage(
-                    model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f).clickable { /* TODO Open Group Info */ }) {
-                    Text(group.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${group.members.size} members", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
-                }
-            }
-        }
-
-        // Messages List
-        Box(modifier = Modifier.weight(1f)) {
-            // Chat background pattern could go here
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                state = listState,
-                reverseLayout = true
-            ) {
-                item { EncryptionNotice() }
-                items(messages, key = { it.id }) { msg ->
-                    val isMe = msg.senderMobile == currentUser.mobile
-                    val senderName = if (isMe) "You" else membersMap[msg.senderMobile]?.name ?: msg.senderMobile
-                    GroupMessageBubble(msg, isMe, senderName)
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-            }
-        }
-
-        // Input Area
-        Row(
-            modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            IconButton(onClick = { /* TODO Attachment */ }) {
-                Icon(Icons.Default.AttachFile, contentDescription = "Attach", tint = RasGramTheme.TextMuted)
-            }
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Message", color = RasGramTheme.TextMuted) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = RasGramTheme.DarkBackground,
-                    unfocusedContainerColor = RasGramTheme.DarkBackground,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedTextColor = RasGramTheme.TextPrimary,
-                    unfocusedTextColor = RasGramTheme.TextPrimary
-                ),
-                shape = RoundedCornerShape(24.dp),
-                maxLines = 4
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            FloatingActionButton(
-                onClick = {
-                    if (text.isNotBlank()) {
-                        sendGroupMessage(db, group.id, currentUser.mobile, text)
-                        text = ""
+        if (selectedMessages.isNotEmpty()) {
+            SelectionHeader(
+                count = selectedMessages.size,
+                onClose = { selectedMessages = emptySet() },
+                onDelete = {
+                    scope.launch {
+                        selectedMessages.forEach { id ->
+                            db.collection("groups").document(group.id).collection("messages").document(id).update("isDeleted", true, "text", "")
+                        }
+                        selectedMessages = emptySet()
                     }
                 },
-                containerColor = RasGramTheme.Green,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-fun GroupMessageBubble(message: Message, isMe: Boolean, senderName: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
-    ) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 12.dp, topEnd = 12.dp,
-                bottomStart = if (isMe) 12.dp else 4.dp,
-                bottomEnd = if (isMe) 4.dp else 12.dp
-            ),
-            color = if (isMe) RasGramTheme.BubbleOut else RasGramTheme.BubbleIn,
-            shadowElevation = 1.dp
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                if (!isMe) {
-                    Text(
-                        senderName, 
-                        style = MaterialTheme.typography.labelMedium, 
-                        color = RasGramTheme.Yellow, 
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
+                onForward = { }, onStar = { },
+                onCopy = {
+                    val text = messages.filter { it.id in selectedMessages }.joinToString("\n") { it.text }
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("messages", text))
+                    selectedMessages = emptySet()
                 }
-                
-                // Decrypt logic: group messages use groupId as AES key (symmetric)
-                val decryptedText = AESCrypto.decrypt(message.receiverMobile, message.text) ?: message.text
-
-                Text(decryptedText, style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextPrimary)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    message.timeString,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = RasGramTheme.TextMuted,
-                    fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.End)
-                )
+            )
+        } else {
+            Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel, shadowElevation = 4.dp) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (isCompact) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = RasGramTheme.TextPrimary) } }
+                    AsyncImage(
+                        model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
+                        contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(group.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${group.members.size} members", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+                    }
+                }
             }
         }
-    }
-}
 
-fun sendGroupMessage(db: FirebaseFirestore, groupId: String, senderMobile: String, text: String) {
-    val encryptedText = AESCrypto.encrypt(groupId, text) ?: text
-    val now = System.currentTimeMillis()
-    val message = hashMapOf(
-        "text" to encryptedText,
-        "senderMobile" to senderMobile,
-        "timestamp" to now,
-        "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(now))
-    )
-    db.collection("groups").document(groupId).collection("messages").add(message)
-    db.collection("groups").document(groupId).update("lastMessageTime", now)
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                item { EncryptionNotice() }
+                messages.forEach { msg ->
+                    item(key = msg.id) {
+                        val isMe = msg.senderMobile == currentUser.mobile
+                        val senderName = if (isMe) "You" else membersMap[msg.senderMobile]?.name ?: msg.senderMobile
+                        MessageBubble(
+                            message = msg, isMe = isMe, isSelected = msg.id in selectedMessages, senderName = senderName,
+                            onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); selectedMessages = selectedMessages + msg.id },
+                            onClick = { if (selectedMessages.isNotEmpty()) selectedMessages = if (msg.id in selectedMessages) selectedMessages - msg.id else selectedMessages + msg.id },
+                            onReact = { rx -> scope.launch { db.collection("groups").document(group.id).collection("messages").document(msg.id).update("reaction", if (msg.reaction == rx) null else rx) } },
+                            onReply = { replyToMessage = msg },
+                            onDelete = { scope.launch { db.collection("groups").document(group.id).collection("messages").document(msg.id).update("isDeleted", true, "text", "") } },
+                            onStar = { }, onCopy = {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("message", msg.text))
+                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (isUploading) {
+            LinearProgressIndicator(progress = { uploadProgress }, modifier = Modifier.fillMaxWidth(), color = RasGramTheme.Green, trackColor = RasGramTheme.DarkPanel)
+        }
+
+        replyToMessage?.let { reply ->
+            ReplyPreview(message = reply, currentUserMobile = currentUser.mobile, onDismiss = { replyToMessage = null })
+        }
+
+        ChatInputBar(
+            inputText = inputText,
+            onTextChange = { inputText = it },
+            onSend = {
+                val text = inputText.trim()
+                if (text.isNotBlank()) {
+                    val encryptedText = AESCrypto.encrypt(group.id, text)
+                    val encryptedReply = replyToMessage?.text?.let { AESCrypto.encrypt(group.id, it) }
+                    val now = System.currentTimeMillis()
+                    val msgMap = hashMapOf(
+                        "text" to encryptedText, "senderMobile" to currentUser.mobile,
+                        "timestamp" to now, "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(now)),
+                        "replyToId" to replyToMessage?.id, "replyToText" to encryptedReply, "replyToSender" to replyToMessage?.senderMobile
+                    )
+                    db.collection("groups").document(group.id).collection("messages").add(msgMap)
+                    db.collection("groups").document(group.id).update("lastMessageTime", now)
+                    inputText = ""
+                    replyToMessage = null
+                }
+            },
+            onAttachClick = { showAttachMenu = true },
+            isRecording = isRecording, recordingSeconds = recordingSeconds,
+            onMicPress = {
+                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                if (!hasPerm) { permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO)); return@ChatInputBar }
+                if (!isRecording) {
+                    try {
+                        val file = File(context.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
+                        recordingFile = file
+                        val recorder = MediaRecorder()
+                        recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+                        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        recorder.setOutputFile(file.absolutePath)
+                        recorder.prepare(); recorder.start()
+                        mediaRecorder = recorder
+                        isRecording = true
+                    } catch (e: Exception) {}
+                }
+            },
+            onMicRelease = {
+                if (isRecording) {
+                    try {
+                        mediaRecorder?.stop(); mediaRecorder?.release(); mediaRecorder = null; isRecording = false
+                        val file = recordingFile ?: return@ChatInputBar
+                        if (file.exists() && file.length() > 0) {
+                            isUploading = true
+                            scope.launch {
+                                val (url, fileName, _) = uploadToCloudinary(context, file.toUri()) { prog -> uploadProgress = prog }
+                                if (url != null) {
+                                    val now = System.currentTimeMillis()
+                                    val msgMap = hashMapOf(
+                                        "text" to "", "senderMobile" to currentUser.mobile, "fileUrl" to url, "fileName" to (fileName ?: "voice.m4a"),
+                                        "fileType" to "audio/mp4", "duration" to recordingSeconds, "timestamp" to now,
+                                        "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(now))
+                                    )
+                                    db.collection("groups").document(group.id).collection("messages").add(msgMap)
+                                    db.collection("groups").document(group.id).update("lastMessageTime", now)
+                                }
+                                isUploading = false; uploadProgress = 0f; file.delete()
+                            }
+                        }
+                    } catch (e: Exception) { isRecording = false }
+                }
+            },
+            onMicCancel = { mediaRecorder?.release(); mediaRecorder = null; isRecording = false; recordingFile?.delete() }
+        )
+    }
 }
 
