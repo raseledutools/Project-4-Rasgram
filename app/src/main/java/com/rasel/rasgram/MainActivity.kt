@@ -3938,8 +3938,6 @@ fun EncryptionNotice() {
     }
 }
 // ==================== GROUP CHAT AREA ====================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupChatArea(
