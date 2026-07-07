@@ -1,6 +1,12 @@
 package com.rasel.rasgram
 
 import android.Manifest
+import java.security.MessageDigest
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
+import android.util.Base64
+import com.google.firebase.firestore.PersistentCacheSettings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -90,10 +96,6 @@ import java.io.File
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
-import javax.crypto.Cipher
-import javax.crypto.spec.SecretKeySpec
-import javax.crypto.spec.IvParameterSpec
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 // ==================== CONSTANTS ====================
@@ -229,6 +231,49 @@ object RasGramTheme {
 }
 
 // ==================== MAIN ACTIVITY ====================
+
+// ==================== END TO END ENCRYPTION ====================
+object AESCrypto {
+    private const val SALT = "RasGram_E2EE_Secret_Salt_2026"
+
+    private fun getKeyIv(chatId: String): Pair<SecretKeySpec, IvParameterSpec> {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest((chatId + SALT).toByteArray(Charsets.UTF_8))
+        val key = ByteArray(16)
+        val iv = ByteArray(16)
+        System.arraycopy(hash, 0, key, 0, 16)
+        System.arraycopy(hash, 16, iv, 0, 16)
+        return Pair(SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+    }
+
+    fun encrypt(chatId: String, text: String): String {
+        if (text.isEmpty()) return text
+        return try {
+            val (key, iv) = getKeyIv(chatId)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, iv)
+            val encrypted = cipher.doFinal(text.toByteArray(Charsets.UTF_8))
+            "E2EE:" + Base64.encodeToString(encrypted, Base64.DEFAULT)
+        } catch (e: Exception) {
+            text
+        }
+    }
+
+    fun decrypt(chatId: String, encryptedText: String): String {
+        if (encryptedText.isEmpty() || !encryptedText.startsWith("E2EE:")) return encryptedText
+        return try {
+            val actualEncrypted = encryptedText.replace("E2EE:", "").trim()
+            val (key, iv) = getKeyIv(chatId)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, key, iv)
+            val decoded = Base64.decode(actualEncrypted, Base64.DEFAULT)
+            String(cipher.doFinal(decoded), Charsets.UTF_8)
+        } catch (e: Exception) {
+            "🔓 (Decryption failed)"
+        }
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -823,6 +868,7 @@ fun MainScreen(
     var selectedContact by remember { mutableStateOf<User?>(null) }
     var selectedGroup by remember { mutableStateOf<Group?>(null) }
     var showCallUI by remember { mutableStateOf(false) }
+    var selectedStatusUser by remember { mutableStateOf<List<Status>?>(null) }
     var callType by remember { mutableStateOf("audio") }
     var callContact by remember { mutableStateOf<User?>(null) }
     var liveCurrentUser by remember { mutableStateOf(currentUser) }
@@ -1425,25 +1471,6 @@ fun ContactItem(
     }
 }
 
-@Composable
-fun EncryptionNotice() {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            color = Color(0xFF1E2B30),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Messages and calls are end-to-end encrypted.", color = Color(0xFFFFD54F), fontSize = 11.sp, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
-
 // ==================== CHAT AREA ====================
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1548,7 +1575,7 @@ fun ChatArea(
                                 callType = d["callType"] as? String,
                                 isPending = doc.metadata.hasPendingWrites(),
                                 replyToId = d["replyToId"] as? String,
-                                replyToText = (d["replyToText"] as? String)?.let { AESCrypto.decrypt(chatId, it) },
+                                replyToText = d["replyToText"] as? String,
                                 replyToSender = d["replyToSender"] as? String,
                                 isDeleted = d["isDeleted"] as? Boolean ?: false,
                                 isForwarded = d["isForwarded"] as? Boolean ?: false,
@@ -2427,7 +2454,7 @@ fun CallLogBubble(message: Message) {
                     tint = if (message.callStatus == "missed") RasGramTheme.Red else RasGramTheme.Green
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(message.text, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
+                Text(decryptedText, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(message.timeString, style = MaterialTheme.typography.labelSmall, color = RasGramTheme.TextMuted, fontSize = 10.sp)
             }
@@ -2652,7 +2679,7 @@ fun MessageContextMenu(
 
 // ==================== STATUS TAB ====================
 @Composable
-fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
+fun StatusTab(currentUser: User, onStatusClick: (List<Status>) -> Unit, modifier: Modifier = Modifier) {
     val db = remember { FirebaseFirestore.getInstance() }
     var statuses by remember { mutableStateOf<List<Status>>(emptyList()) }
     val context = LocalContext.current
@@ -2727,7 +2754,10 @@ fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
                     name = "My Status",
                     subtitle = if (isUploading) "Uploading..." else "Tap to add status update",
                     hasNewStatus = false,
-                    onClick = { imageLauncher.launch(arrayOf("image/*", "video/*")) },
+                    onClick = { 
+                        if (myStatuses.isNotEmpty()) onStatusClick(myStatuses) 
+                        else imageLauncher.launch(arrayOf("image/*", "video/*"))
+                    },
                     isMyStatus = true
                 )
                 HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
@@ -2749,7 +2779,7 @@ fun StatusTab(currentUser: User, modifier: Modifier = Modifier) {
                         name = first.userName,
                         subtitle = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(first.timestamp)),
                         hasNewStatus = !viewed,
-                        onClick = { /* View status */ },
+                        onClick = { onStatusClick(userStatuses) },
                         isMyStatus = false
                     )
                     HorizontalDivider(color = RasGramTheme.DividerColor, modifier = Modifier.padding(start = 80.dp))
@@ -2962,7 +2992,9 @@ fun CallingScreen(
     }
     val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80").setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443").setUsername("openrelayproject").setPassword("openrelayproject").createIceServer()
     )
 
     var peerConnection by remember { mutableStateOf<PeerConnection?>(null) }
@@ -3674,7 +3706,7 @@ fun sendMessage(
         "isForwarded" to false,
         "isStarred" to false,
         "replyToId" to replyToId,
-        "replyToText" to AESCrypto.decrypt(chatId, message.replyToText ?: ""),
+        "replyToText" to encryptedReply,
         "replyToSender" to replyToSender,
         "duration" to duration
     )
@@ -3802,405 +3834,100 @@ fun getVideoCapturer(context: Context): VideoCapturer? = try {
 }
 
 
-
-// ==================== GROUP CHAT AREA ====================
+// ==================== STATUS VIEWER SCREEN ====================
 @Composable
-fun GroupChatArea(
-    currentUser: User,
-    group: Group,
-    onBack: () -> Unit,
-    onCallClick: (String) -> Unit
+fun StatusViewerScreen(
+    statuses: List<Status>,
+    initialIndex: Int,
+    onClose: () -> Unit
 ) {
-    val db = remember { FirebaseFirestore.getInstance() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val isCompact = isCompactScreen()
-
-    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
-    var inputText by remember { mutableStateOf("") }
-    var liveGroup by remember { mutableStateOf(group) }
-    var isUploading by remember { mutableStateOf(false) }
-    var uploadProgress by remember { mutableFloatStateOf(0f) }
-    var replyToMessage by remember { mutableStateOf<Message?>(null) }
-    var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showAttachMenu by remember { mutableStateOf(false) }
-    var isRecording by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableIntStateOf(0) }
-    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
-    var recordingFile by remember { mutableStateOf<File?>(null) }
-    val listState = rememberLazyListState()
-    val haptic = LocalHapticFeedback.current
-
-    val chatId = group.id
-
-    // File launchers
-    val imageVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            isUploading = true
-            scope.launch {
-                try {
-                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
-                    if (url != null) {
-                        sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName, fileType)
-                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-                isUploading = false
-                uploadProgress = 0f
-            }
+    var currentIndex by remember { mutableIntStateOf(initialIndex) }
+    if (currentIndex >= statuses.size || currentIndex < 0) {
+        onClose()
+        return
+    }
+    
+    val currentStatus = statuses[currentIndex]
+    var progress by remember { mutableFloatStateOf(0f) }
+    
+    LaunchedEffect(currentIndex) {
+        progress = 0f
+        val duration = 5000L // 5 seconds per image status
+        val interval = 50L
+        while (progress < 1f) {
+            delay(interval)
+            progress += interval.toFloat() / duration
         }
+        currentIndex++
     }
-
-    val docLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            isUploading = true
-            scope.launch {
-                try {
-                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
-                    if (url != null) {
-                        sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName, fileType)
-                    } else Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+    
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AsyncImage(
+            model = currentStatus.mediaUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
+        )
+        
+        // Progress bars
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp, start = 8.dp, end = 8.dp).statusBarsPadding()) {
+            statuses.forEachIndexed { index, status ->
+                val p = when {
+                    index < currentIndex -> 1f
+                    index == currentIndex -> progress
+                    else -> 0f
                 }
-                isUploading = false
-                uploadProgress = 0f
-            }
-        }
-    }
-
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-        if (perms[Manifest.permission.RECORD_AUDIO] == true) {
-            // Start recording
-        }
-    }
-
-    // Load messages with real-time listener
-    LaunchedEffect(chatId) {
-        db.collection("pvt_msg_$chatId")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                snapshot?.let { qs ->
-                    messages = qs.documents.mapNotNull { doc ->
-                        doc.data?.let { d ->
-                            Message(
-                                id = doc.id,
-                                text = AESCrypto.decrypt(chatId, d["text"] as? String ?: ""),
-                                senderMobile = d["senderMobile"] as? String ?: "",
-                                receiverMobile = d["receiverMobile"] as? String ?: "",
-                                timestamp = d["timestamp"] as? Long ?: 0,
-                                timeString = d["timeString"] as? String ?: "",
-                                fileUrl = d["fileUrl"] as? String,
-                                fileName = d["fileName"] as? String,
-                                fileType = d["fileType"] as? String,
-                                fileSizeBytes = d["fileSizeBytes"] as? Long ?: 0,
-                                reaction = d["reaction"] as? String,
-                                read = d["read"] as? Boolean ?: false,
-                                delivered = d["delivered"] as? Boolean ?: false,
-                                isCallLog = d["isCallLog"] as? Boolean ?: false,
-                                callStatus = d["callStatus"] as? String,
-                                callType = d["callType"] as? String,
-                                isPending = doc.metadata.hasPendingWrites(),
-                                replyToId = d["replyToId"] as? String,
-                                replyToText = (d["replyToText"] as? String)?.let { AESCrypto.decrypt(chatId, it) },
-                                replyToSender = d["replyToSender"] as? String,
-                                isDeleted = d["isDeleted"] as? Boolean ?: false,
-                                isForwarded = d["isForwarded"] as? Boolean ?: false,
-                                isStarred = d["isStarred"] as? Boolean ?: false,
-                                duration = (d["duration"] as? Long)?.toInt() ?: 0
-                            )
-                        }
-                    }
-                    // Mark as read
-                    qs.documents.filter { doc ->
-                        doc.getString("senderMobile") == group.id && doc.getBoolean("read") == false
-                    }.forEach { doc ->
-                        doc.reference.update("read", true, "delivered", true)
-                    }
-                }
-            }
-    }
-
-    // Contact live status
-    LaunchedEffect(group.id) {
-        db.collection("chat_users").document(group.id).addSnapshotListener { snap, _ ->
-            snap?.data?.let { d ->
-                liveContact = liveContact.copy(
-                    name = d["name"] as? String ?: liveContact.name,
-                    avatarUrl = d["avatarUrl"] as? String ?: liveContact.avatarUrl,
-                    typingTo = d["typingTo"] as? String,
-                    lastActive = d["lastActive"] as? Long ?: 0
+                LinearProgressIndicator(
+                    progress = { p },
+                    modifier = Modifier.weight(1f).padding(horizontal = 2.dp).height(3.dp).clip(RoundedCornerShape(1.dp)),
+                    color = Color.White,
+                    trackColor = Color.Gray.copy(alpha = 0.5f)
                 )
             }
         }
-    }
-
-    // Auto scroll to bottom
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-    }
-
-    // Recording timer
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            recordingSeconds = 0
-            while (isRecording) { delay(1000); recordingSeconds++ }
-        }
-    }
-
-    var typingJob by remember { mutableStateOf<Job?>(null) }
-
-    fun sendText() {
-        val text = inputText.trim()
-        if (text.isBlank()) return
-        sendMessage(
-            db, chatId, currentUser.mobile, "", text, null, null, null,
-            replyToMessage?.id, replyToMessage?.text, replyToMessage?.senderMobile
-        )
-        inputText = ""
-        replyToMessage = null
-        typingJob?.cancel()
-        scope.launch { db.collection("chat_users").document(currentUser.mobile).update("typingTo", null) }
-    }
-
-    BackHandler(enabled = selectedMessages.isNotEmpty()) {
-        selectedMessages = emptySet()
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
+        
         // Header
-        if (selectedMessages.isNotEmpty()) {
-            SelectionHeader(
-                count = selectedMessages.size,
-                onClose = { selectedMessages = emptySet() },
-                onDelete = {
-                    scope.launch {
-                        selectedMessages.forEach { id ->
-                            db.collection("pvt_msg_$chatId").document(id).update("isDeleted", true, "text", "")
-                        }
-                        selectedMessages = emptySet()
-                    }
-                },
-                onForward = { /* Forward logic */ },
-                onStar = {
-                    scope.launch {
-                        selectedMessages.forEach { id ->
-                            db.collection("pvt_msg_$chatId").document(id).update("isStarred", true)
-                        }
-                        selectedMessages = emptySet()
-                    }
-                },
-                onCopy = {
-                    val text = messages.filter { it.id in selectedMessages }.joinToString("\n") { it.text }
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("messages", text))
-                    selectedMessages = emptySet()
-                }
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
+            AsyncImage(
+                model = currentStatus.userAvatar.ifEmpty { "https://ui-avatars.com/api/?name=${currentStatus.userName.replace(" ", "+")}&background=008069&color=fff" },
+                contentDescription = null,
+                modifier = Modifier.size(40.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop
             )
-        } else {
-            ChatHeader(
-                contact = liveContact,
-                currentUserMobile = currentUser.mobile,
-                isCompact = isCompact,
-                onBack = onBack,
-                onCallClick = onCallClick,
-                onClearChat = {
-                    scope.launch {
-                        db.collection("pvt_msg_$chatId").get().await().documents.forEach { it.reference.delete() }
-                    }
-                },
-                onViewContact = { /* View contact */ }
-            )
-        }
-
-        // Messages area
-        Box(modifier = Modifier.weight(1f)) {
-            // Chat wallpaper pattern (subtle)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                // subtle background pattern
-            }
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                item {
-                    EncryptionNotice()
-                }
-
-                var lastDateString = ""
-                messages.forEach { message ->
-                    val dateStr = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(Date(message.timestamp))
-                    if (dateStr != lastDateString) {
-                        lastDateString = dateStr
-                        item(key = "date_$dateStr") {
-                            DateDivider(dateStr)
-                        }
-                    }
-                    item(key = message.id) {
-                                }
-                            },
-                            onReact = { reaction ->
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("reaction", if (message.reaction == reaction) null else reaction)
-                                }
-                            },
-                            onReply = { replyToMessage = message },
-                            onDelete = {
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("isDeleted", true, "text", "")
-                                }
-                            },
-                            onStar = {
-                                scope.launch {
-                                    db.collection("pvt_msg_$chatId").document(message.id)
-                                        .update("isStarred", !message.isStarred)
-                                }
-                            },
-                            onCopy = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("message", message.text))
-                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Scroll-to-bottom FAB - inside Box(weight(1f)) BoxScope, using wrapContentSize
-            val showScrollFab by remember { derivedStateOf { listState.firstVisibleItemIndex < messages.size - 5 && messages.size > 10 } }
-            if (showScrollFab) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 16.dp, end = 16.dp),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    FloatingActionButton(
-                        onClick = { scope.launch { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) } },
-                        modifier = Modifier.size(40.dp),
-                        containerColor = RasGramTheme.DarkPanel,
-                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                    ) {
-                        Icon(Icons.Default.KeyboardArrowDown, null, tint = RasGramTheme.TextMuted)
-                    }
-                }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(currentStatus.userName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(formatLastSeen(System.currentTimeMillis() - currentStatus.timestamp), color = Color.LightGray, fontSize = 13.sp)
             }
         }
-
-        // Upload progress
-        if (isUploading) {
-            LinearProgressIndicator(
-                progress = { uploadProgress },
-                modifier = Modifier.fillMaxWidth(),
-                color = RasGramTheme.Green,
-                trackColor = RasGramTheme.DarkPanel
-            )
+        
+        // Tap areas for navigation
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {
+                if (currentIndex > 0) currentIndex-- else progress = 0f
+            })
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {
+                currentIndex++
+            })
         }
-
-        // Reply preview
-        replyToMessage?.let { reply ->
-            ReplyPreview(
-                message = reply,
-                currentUserMobile = currentUser.mobile,
-                onDismiss = { replyToMessage = null }
-            )
-        }
-
-        // Input area
-        ChatInputBar(
-            inputText = inputText,
-            onTextChange = { text ->
-                inputText = text
-                if (text.isNotEmpty()) {
-                    typingJob?.cancel()
-                    typingJob = scope.launch {
-                        db.collection("chat_users").document(currentUser.mobile).update("typingTo", group.id)
-                        delay(TYPING_DEBOUNCE_MS)
-                        db.collection("chat_users").document(currentUser.mobile).update("typingTo", null)
-                    }
-                }
-            },
-            onSend = { sendText() },
-            onAttachClick = { showAttachMenu = true },
-            isRecording = isRecording,
-            recordingSeconds = recordingSeconds,
-            onMicPress = {
-                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                if (!hasPerm) {
-                    permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                    return@ChatInputBar
-                }
-                if (!isRecording) {
-                    try {
-                        val file = File(context.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
-                        recordingFile = file
-                        val recorder = MediaRecorder()
-                        recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-                        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        recorder.setOutputFile(file.absolutePath)
-                        recorder.prepare()
-                        recorder.start()
-                        mediaRecorder = recorder
-                        isRecording = true
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Recording error: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
-            onMicRelease = {
-                if (isRecording) {
-                    try {
-                        mediaRecorder?.stop()
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        isRecording = false
-                        val file = recordingFile ?: return@ChatInputBar
-                        if (file.exists() && file.length() > 0) {
-                            isUploading = true
-                            scope.launch {
-                                val (url, fileName, _) = uploadToCloudinary(context, file.toUri()) { prog -> uploadProgress = prog }
-                                if (url != null) {
-                                    sendMessage(db, chatId, currentUser.mobile, "", "", url, fileName ?: "voice.m4a", "audio/mp4", null, null, null, recordingSeconds)
-                                }
-                                isUploading = false
-                                uploadProgress = 0f
-                                file.delete()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        isRecording = false
-                    }
-                }
-            },
-            onMicCancel = {
-                mediaRecorder?.release()
-                mediaRecorder = null
-                isRecording = false
-                recordingFile?.delete()
-            }
-        )
-    }
-
-    // Attachment menu
-    if (showAttachMenu) {
-        AttachmentMenuSheet(
-            onDismiss = { showAttachMenu = false },
-            onImageVideo = { imageVideoLauncher.launch(arrayOf("image/*", "video/*")); showAttachMenu = false },
-            onDocument = { docLauncher.launch(arrayOf("*/*")); showAttachMenu = false },
-            onAudio = { docLauncher.launch(arrayOf("audio/*")); showAttachMenu = false }
-        )
     }
 }
-
 @Composable
-
-
-
+fun EncryptionNotice() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            color = Color(0xFF1E2B30),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Messages and calls are end-to-end encrypted.", color = Color(0xFFFFD54F), fontSize = 11.sp, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
