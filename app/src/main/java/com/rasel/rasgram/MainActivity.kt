@@ -934,7 +934,8 @@ fun MainScreen(
                             isDarkMode = isDarkMode,
                             onToggleTheme = onToggleTheme,
                             onLogout = onLogout,
-                            onUserUpdate = onUserUpdate
+                            onUserUpdate = onUserUpdate,
+                            onStatusClick = { selectedStatusUser = it }
                         )
                     }
                 } else {
@@ -948,6 +949,7 @@ fun MainScreen(
                         onToggleTheme = onToggleTheme,
                         onLogout = onLogout,
                         onUserUpdate = onUserUpdate,
+                        onStatusClick = { selectedStatusUser = it },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
