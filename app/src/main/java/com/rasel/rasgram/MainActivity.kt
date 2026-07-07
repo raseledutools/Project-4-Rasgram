@@ -907,6 +907,12 @@ fun MainScreen(
                     showCallUI = true
                 }
             )
+        } else if (selectedGroup != null) {
+            GroupChatArea(
+                currentUser = liveCurrentUser,
+                group = selectedGroup!!,
+                onBack = { selectedGroup = null }
+            )
         }
     } else {
         Scaffold(
@@ -967,6 +973,12 @@ fun MainScreen(
                                     callContact = selectedContact
                                     showCallUI = true
                                 }
+                            )
+                        } else if (selectedGroup != null) {
+                            GroupChatArea(
+                                currentUser = liveCurrentUser,
+                                group = selectedGroup!!,
+                                onBack = { selectedGroup = null }
                             )
                         } else {
                             EmptyChatState()
