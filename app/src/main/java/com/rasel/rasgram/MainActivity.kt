@@ -1055,6 +1055,7 @@ fun SidebarContent(
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit,
     onUserUpdate: (User) -> Unit,
+    onStatusClick: (List<Status>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     when (tab) {
