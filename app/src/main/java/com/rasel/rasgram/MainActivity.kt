@@ -1,4 +1,4 @@
-﻿package com.rasel.rasgram
+package com.rasel.rasgram
 
 import android.Manifest
 import java.security.MessageDigest
@@ -301,7 +301,6 @@ fun RasGramApp() {
     val auth = remember { FirebaseAuth.getInstance() }
     var isLoggedIn by remember {
         mutableStateOf(
-            auth.currentUser != null &&
             prefs.getString(PREF_MOBILE, null) != null &&
             prefs.getString(PREF_UID, null) != null
         )
