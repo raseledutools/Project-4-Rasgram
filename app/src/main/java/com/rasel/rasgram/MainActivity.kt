@@ -3914,3 +3914,206 @@ fun EncryptionNotice() {
         }
     }
 }
+// ==================== GROUP CHAT AREA ====================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupChatArea(
+    currentUser: User,
+    group: Group,
+    onBack: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+    val isCompact = isCompactScreen()
+    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
+    var text by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    
+    // Group members cache for name mapping
+    var membersMap by remember { mutableStateOf<Map<String, User>>(emptyMap()) }
+
+    LaunchedEffect(group.id) {
+        // Fetch group members details
+        if (group.members.isNotEmpty()) {
+            db.collection("chat_users")
+                .whereIn("mobile", group.members.take(10))
+                .get()
+                .addOnSuccessListener { snap ->
+                    val map = mutableMapOf<String, User>()
+                    snap.documents.forEach { doc ->
+                        doc.data?.let { d ->
+                            val u = User(
+                                uid = doc.id,
+                                name = d["name"] as? String ?: "",
+                                mobile = d["mobile"] as? String ?: "",
+                                avatarUrl = d["avatarUrl"] as? String ?: ""
+                            )
+                            map[u.mobile] = u
+                        }
+                    }
+                    membersMap = map
+                }
+        }
+
+        // Listen to messages
+        db.collection("groups").document(group.id).collection("messages")
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(100)
+            .addSnapshotListener { snap, _ ->
+                snap?.documents?.mapNotNull { doc ->
+                    doc.data?.let { d ->
+                        Message(
+                            id = doc.id,
+                            text = d["text"] as? String ?: "",
+                            senderMobile = d["senderMobile"] as? String ?: "",
+                            receiverMobile = group.id,
+                            timestamp = d["timestamp"] as? Long ?: 0,
+                            timeString = d["timeString"] as? String ?: "",
+                            fileUrl = d["fileUrl"] as? String,
+                            fileName = d["fileName"] as? String,
+                            fileType = d["fileType"] as? String
+                        )
+                    }
+                }?.also { msgs ->
+                    messages = msgs
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(RasGramTheme.DarkBackground)) {
+        // Top Bar
+        Surface(modifier = Modifier.fillMaxWidth(), color = RasGramTheme.DarkPanel, shadowElevation = 4.dp) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (isCompact) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = RasGramTheme.TextPrimary)
+                    }
+                }
+                AsyncImage(
+                    model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f).clickable { /* TODO Open Group Info */ }) {
+                    Text(group.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${group.members.size} members", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+                }
+            }
+        }
+
+        // Messages List
+        Box(modifier = Modifier.weight(1f)) {
+            // Chat background pattern could go here
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                state = listState,
+                reverseLayout = true
+            ) {
+                item { EncryptionNotice() }
+                items(messages, key = { it.id }) { msg ->
+                    val isMe = msg.senderMobile == currentUser.mobile
+                    val senderName = if (isMe) "You" else membersMap[msg.senderMobile]?.name ?: msg.senderMobile
+                    GroupMessageBubble(msg, isMe, senderName)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+            }
+        }
+
+        // Input Area
+        Row(
+            modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            IconButton(onClick = { /* TODO Attachment */ }) {
+                Icon(Icons.Default.AttachFile, contentDescription = "Attach", tint = RasGramTheme.TextMuted)
+            }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Message", color = RasGramTheme.TextMuted) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = RasGramTheme.DarkBackground,
+                    unfocusedContainerColor = RasGramTheme.DarkBackground,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedTextColor = RasGramTheme.TextPrimary,
+                    unfocusedTextColor = RasGramTheme.TextPrimary
+                ),
+                shape = RoundedCornerShape(24.dp),
+                maxLines = 4
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            FloatingActionButton(
+                onClick = {
+                    if (text.isNotBlank()) {
+                        sendGroupMessage(db, group.id, currentUser.mobile, text)
+                        text = ""
+                    }
+                },
+                containerColor = RasGramTheme.Green,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun GroupMessageBubble(message: Message, isMe: Boolean, senderName: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 12.dp, topEnd = 12.dp,
+                bottomStart = if (isMe) 12.dp else 4.dp,
+                bottomEnd = if (isMe) 4.dp else 12.dp
+            ),
+            color = if (isMe) RasGramTheme.BubbleOut else RasGramTheme.BubbleIn,
+            shadowElevation = 1.dp
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (!isMe) {
+                    Text(
+                        senderName, 
+                        style = MaterialTheme.typography.labelMedium, 
+                        color = RasGramTheme.Yellow, 
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+                
+                // Decrypt logic: group messages use groupId as AES key (symmetric)
+                val decryptedText = AESCrypto.decrypt(message.receiverMobile, message.text) ?: message.text
+
+                Text(decryptedText, style = MaterialTheme.typography.bodyMedium, color = RasGramTheme.TextPrimary)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    message.timeString,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = RasGramTheme.TextMuted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
+        }
+    }
+}
+
+fun sendGroupMessage(db: FirebaseFirestore, groupId: String, senderMobile: String, text: String) {
+    val encryptedText = AESCrypto.encrypt(groupId, text) ?: text
+    val now = System.currentTimeMillis()
+    val message = hashMapOf(
+        "text" to encryptedText,
+        "senderMobile" to senderMobile,
+        "timestamp" to now,
+        "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(now))
+    )
+    db.collection("groups").document(groupId).collection("messages").add(message)
+    db.collection("groups").document(groupId).update("lastMessageTime", now)
+}
+
