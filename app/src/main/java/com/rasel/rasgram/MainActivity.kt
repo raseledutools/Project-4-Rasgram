@@ -997,6 +997,16 @@ fun MainScreen(
             onEndCall = { showCallUI = false }
         )
     }
+
+    // Status Viewer overlay
+    if (selectedStatusUser != null && selectedStatusUser!!.isNotEmpty()) {
+        StatusViewerScreen(
+            currentUserMobile = liveCurrentUser.mobile,
+            statuses = selectedStatusUser!!,
+            initialIndex = 0,
+            onClose = { selectedStatusUser = null }
+        )
+    }
 }
 
 @Composable
@@ -3843,10 +3853,12 @@ fun getVideoCapturer(context: Context): VideoCapturer? = try {
 // ==================== STATUS VIEWER SCREEN ====================
 @Composable
 fun StatusViewerScreen(
+    currentUserMobile: String,
     statuses: List<Status>,
     initialIndex: Int,
     onClose: () -> Unit
 ) {
+    val db = remember { FirebaseFirestore.getInstance() }
     var currentIndex by remember { mutableIntStateOf(initialIndex) }
     if (currentIndex >= statuses.size || currentIndex < 0) {
         onClose()
@@ -3857,6 +3869,13 @@ fun StatusViewerScreen(
     var progress by remember { mutableFloatStateOf(0f) }
     
     LaunchedEffect(currentIndex) {
+        // Mark as viewed
+        if (currentUserMobile !in currentStatus.viewedBy) {
+            db.collection("statuses").document(currentStatus.id).update(
+                "viewedBy", com.google.firebase.firestore.FieldValue.arrayUnion(currentUserMobile)
+            )
+        }
+        
         progress = 0f
         val duration = 5000L // 5 seconds per image status
         val interval = 50L
