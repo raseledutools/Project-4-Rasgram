@@ -5,6 +5,10 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.rasel.rasgram.User
+import com.rasel.rasgram.Message
+import com.rasel.rasgram.Status
+import com.rasel.rasgram.Group
 
 @Database(entities = [User::class, Message::class, Status::class, Group::class], version = 1, exportSchema = false)
 @TypeConverters(Converters::class)
