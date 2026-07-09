@@ -1,4 +1,4 @@
-﻿package com.rasel.rasgram
+package com.rasel.rasgram
 
 import android.Manifest
 import java.security.MessageDigest
@@ -146,6 +146,50 @@ fun GroupChatArea(
 
     // File launchers
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    val imageVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            isUploading = true
+            scope.launch {
+                try {
+                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
+                    if (url != null) {
+                        val msgMap = hashMapOf(
+                            "text" to "", "senderMobile" to currentUser.mobile, "fileUrl" to url,
+                            "fileName" to fileName, "fileType" to fileType, "timestamp" to System.currentTimeMillis(),
+                            "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+                        )
+                        db.collection("groups").document(group.id).collection("messages").add(msgMap)
+                    } else android.widget.Toast.makeText(context, "Upload failed", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                isUploading = false
+                uploadProgress = 0f
+            }
+        }
+    }
+    val docLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            isUploading = true
+            scope.launch {
+                try {
+                    val (url, fileName, fileType) = uploadToCloudinary(context, it) { prog -> uploadProgress = prog }
+                    if (url != null) {
+                        val msgMap = hashMapOf(
+                            "text" to "", "senderMobile" to currentUser.mobile, "fileUrl" to url,
+                            "fileName" to fileName, "fileType" to fileType, "timestamp" to System.currentTimeMillis(),
+                            "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+                        )
+                        db.collection("groups").document(group.id).collection("messages").add(msgMap)
+                    } else android.widget.Toast.makeText(context, "Upload failed", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                isUploading = false
+                uploadProgress = 0f
+            }
+        }
+    }
 
     LaunchedEffect(group.id) {
         if (group.members.isNotEmpty()) {
@@ -388,6 +432,15 @@ fun GroupChatArea(
             messages = messages.filter { it.id in selectedMessages },
             onDismiss = { showForwardDialog = false },
             onForwardComplete = { showForwardDialog = false; selectedMessages = emptySet() }
+        )
+    }
+
+    if (showAttachMenu) {
+        AttachmentMenuSheet(
+            onDismiss = { showAttachMenu = false },
+            onImageVideo = { imageVideoLauncher.launch(arrayOf("image/*", "video/*")); showAttachMenu = false },
+            onDocument = { docLauncher.launch(arrayOf("*/*")); showAttachMenu = false },
+            onAudio = { docLauncher.launch(arrayOf("audio/*")); showAttachMenu = false }
         )
     }
 }
