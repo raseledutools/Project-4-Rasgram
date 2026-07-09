@@ -2,7 +2,7 @@ package com.rasel.rasgram.utils
 
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
-import com.rasel.rasgram.model.Message
+import com.rasel.rasgram.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
