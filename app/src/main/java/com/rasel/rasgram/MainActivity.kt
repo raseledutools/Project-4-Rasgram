@@ -8,6 +8,13 @@ import javax.crypto.spec.SecretKeySpec
 import android.util.Base64
 import com.google.firebase.firestore.PersistentCacheSettings
 import android.content.ClipData
+import androidx.fragment.app.FragmentActivity
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
+import androidx.biometric.BiometricPrompt
+import androidx.biometric.BiometricManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -59,6 +66,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -89,7 +97,7 @@ import kotlinx.coroutines.tasks.await
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
-import okio.source  // FIX #4: correct import for extension function
+import okio.source
 import org.json.JSONObject
 import org.webrtc.*
 import java.io.File
@@ -123,7 +131,8 @@ data class User(
     val statusVisible: Boolean = true,
     val about: String = "Hey there! I am using RasGram.",
     val fcmToken: String = "",
-    val isBlocked: Boolean = false
+    val isBlocked: Boolean = false,
+    val disappearingTimer: Long = 0
 )
 
 data class Message(
@@ -188,7 +197,8 @@ data class Group(
     val admins: List<String> = emptyList(),
     val typingUsers: List<String> = emptyList(),
     val createdBy: String = "",
-    val createdAt: Long = 0
+    val createdAt: Long = 0,
+    val disappearingTimer: Long = 0
 )
 
 data class ChatPreview(
@@ -231,8 +241,6 @@ object RasGramTheme {
     val StarColor = Color(0xFFFFD700)
 }
 
-// ==================== MAIN ACTIVITY ====================
-
 // ==================== END TO END ENCRYPTION ====================
 object AESCrypto {
     private const val SALT = "RasGram_E2EE_Secret_Salt_2026"
@@ -274,16 +282,6 @@ object AESCrypto {
         }
     }
 }
-
-import androidx.fragment.app.FragmentActivity
-import com.google.firebase.remoteconfig.FirebaseRemoteConfig
-import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
-import androidx.biometric.BiometricPrompt
-import androidx.biometric.BiometricManager
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1250,6 +1248,7 @@ fun ChatsTab(
     var showSettings by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
+    var showNewBroadcast by remember { mutableStateOf(false) }
     var showAddContact by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1367,6 +1366,7 @@ fun ChatsTab(
                 onSearchClick = { showSearch = true },
                 onSettingsClick = { showSettings = true },
                 onNewGroupClick = { showNewGroup = true },
+                onNewBroadcastClick = { showNewBroadcast = true },
                 onAddContactClick = { showAddContact = true },
                 onToggleTheme = onToggleTheme,
                 onLogout = onLogout
@@ -1651,6 +1651,7 @@ fun ChatArea(
     var uploadProgress by remember { mutableFloatStateOf(0f) }
     var replyToMessage by remember { mutableStateOf<Message?>(null) }
     var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showForwardDialog by remember { mutableStateOf(false) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableIntStateOf(0) }
@@ -1715,12 +1716,16 @@ fun ChatArea(
                 snapshot?.let { qs ->
                     messages = qs.documents.mapNotNull { doc ->
                         doc.data?.let { d ->
+                            val timestamp = d["timestamp"] as? Long ?: 0
+                            val timer = maxOf(currentUser.disappearingTimer, contact.disappearingTimer)
+                            if (timer > 0 && (System.currentTimeMillis() - timestamp) > timer) return@mapNotNull null
+                            
                             Message(
                                 id = doc.id,
                                 text = AESCrypto.decrypt(chatId, d["text"] as? String ?: ""),
                                 senderMobile = d["senderMobile"] as? String ?: "",
                                 receiverMobile = d["receiverMobile"] as? String ?: "",
-                                timestamp = d["timestamp"] as? Long ?: 0,
+                                timestamp = timestamp,
                                 timeString = d["timeString"] as? String ?: "",
                                 fileUrl = d["fileUrl"] as? String,
                                 fileName = d["fileName"] as? String,
@@ -2385,6 +2390,64 @@ fun AttachOption(icon: ImageVector, label: String, color: Color, onClick: () -> 
     }
 }
 
+// ==================== SWIPE TO REPLY WRAPPER ====================
+@Composable
+fun SwipeToReplyWrapper(
+    onReply: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val animatedOffsetX by animateFloatAsState(targetValue = offsetX, label = "swipe")
+    val scope = rememberCoroutineScope()
+    val replyThreshold = 150f
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (offsetX > replyThreshold) {
+                            onReply()
+                            // Provide haptic feedback if possible, handled by caller
+                        }
+                        scope.launch { offsetX = 0f }
+                    },
+                    onDragCancel = {
+                        scope.launch { offsetX = 0f }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        if (dragAmount > 0 || offsetX > 0) { // Only swipe right
+                            offsetX = (offsetX + dragAmount).coerceIn(0f, 200f)
+                            change.consume()
+                        }
+                    }
+                )
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // Reply icon background
+        if (animatedOffsetX > 20f) {
+            val alpha = (animatedOffsetX / replyThreshold).coerceIn(0f, 1f)
+            val scale = 0.5f + (0.5f * alpha)
+            Icon(
+                imageVector = Icons.Default.Reply,
+                contentDescription = "Reply",
+                tint = RasGramTheme.Green.copy(alpha = alpha),
+                modifier = Modifier
+                    .padding(start = 16.dp)
+                    .size(24.dp)
+                    .scale(scale)
+            )
+        }
+
+        // The actual content (Message bubble)
+        Box(modifier = Modifier.offset { IntOffset(animatedOffsetX.roundToInt(), 0) }) {
+            content()
+        }
+    }
+}
+
 // ==================== MESSAGE BUBBLE ====================
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2408,19 +2471,20 @@ fun MessageBubble(
 
     val selectionBg = if (isSelected) RasGramTheme.Green.copy(alpha = 0.15f) else Color.Transparent
 
-    Column(
-        modifier = Modifier.fillMaxWidth().background(selectionBg).padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalAlignment = alignment
-    ) {
-        if (message.isCallLog) {
-            CallLogBubble(message = message)
-            return@Column
-        }
+    SwipeToReplyWrapper(onReply = onReply) {
+        Column(
+            modifier = Modifier.fillMaxWidth().background(selectionBg).padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalAlignment = alignment
+        ) {
+            if (message.isCallLog) {
+                CallLogBubble(message = message)
+                return@Column
+            }
 
-        if (message.isDeleted) {
-            DeletedMessageBubble(isMe = isMe, timeString = message.timeString)
-            return@Column
-        }
+            if (message.isDeleted) {
+                DeletedMessageBubble(isMe = isMe, timeString = message.timeString)
+                return@Column
+            }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -2546,6 +2610,7 @@ fun MessageBubble(
             }
         }
     }
+    } // Close SwipeToReplyWrapper
 
     // Context menu
     if (showContextMenu) {
@@ -3131,6 +3196,11 @@ fun CallingScreen(
     var callSeconds by remember { mutableIntStateOf(0) }
     var callId by remember { mutableStateOf("") }
 
+    DisposableEffect(Unit) {
+        if (callType == "video") MainActivity.isVideoCallActive = true
+        onDispose { MainActivity.isVideoCallActive = false }
+    }
+
     val eglBase = remember { EglBase.create() }
     val peerConnectionFactory = remember {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
@@ -3385,15 +3455,6 @@ fun CallControlButton(icon: ImageVector, label: String, isActive: Boolean, activ
         Spacer(modifier = Modifier.height(6.dp))
         Text(label, color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
     }
-
-    if (showForwardDialog) {
-        ForwardMessageDialog(
-            currentUser = currentUser,
-            messages = messages.filter { it.id in selectedMessages },
-            onDismiss = { showForwardDialog = false },
-            onForwardComplete = { showForwardDialog = false; selectedMessages = emptySet() }
-        )
-    }
 }
 
 // ==================== FORWARD MESSAGE DIALOG ====================
@@ -3534,6 +3595,7 @@ fun SettingsDialog(
     var about by remember { mutableStateOf(currentUser.about) }
     var isUploading by remember { mutableStateOf(false) }
     var avatarUrl by remember { mutableStateOf(currentUser.avatarUrl) }
+    var disappearingTimer by remember { mutableLongStateOf(currentUser.disappearingTimer) }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -3604,8 +3666,11 @@ fun SettingsDialog(
                             }
                         }
                         1 -> {
-                            // FIX #2: Icons.Default.ProfileBadge doesn't exist â€” replaced with AccountCircle
+                            // FIX #2: Icons.Default.ProfileBadge doesn't exist — replaced with AccountCircle
                             SettingsToggleRow(Icons.Default.Visibility, "Show Last Seen", true) { }
+                            SettingsToggleRow(Icons.Default.Timer, "Disappearing Messages (24h)", disappearingTimer > 0) {
+                                disappearingTimer = if (disappearingTimer > 0) 0L else 24 * 60 * 60 * 1000L
+                            }
                             SettingsToggleRow(Icons.Default.DoneAll, "Show Read Receipts", true) { }
                             SettingsToggleRow(Icons.Default.AccountCircle, "Show Profile Photo", true) { }
                             SettingsToggleRow(Icons.Default.Circle, "Show Status", true) { }
@@ -3623,9 +3688,9 @@ fun SettingsDialog(
                         OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, RasGramTheme.Border), colors = ButtonDefaults.outlinedButtonColors(contentColor = RasGramTheme.TextMuted)) { Text("Cancel") }
                         Button(onClick = {
                             scope.launch {
-                                db.collection("chat_users").document(currentUser.mobile).update("name", name, "about", about)
+                                db.collection("chat_users").document(currentUser.mobile).update("name", name, "about", about, "disappearingTimer", disappearingTimer)
                             }
-                            onSave(currentUser.copy(name = name, about = about, avatarUrl = avatarUrl))
+                            onSave(currentUser.copy(name = name, about = about, avatarUrl = avatarUrl, disappearingTimer = disappearingTimer))
                         }, modifier = Modifier.weight(2f).height(48.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)) {
                             Text("Save Changes", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
@@ -4292,12 +4357,16 @@ fun GroupChatArea(
             .addSnapshotListener { snap, _ ->
                 snap?.documents?.mapNotNull { doc ->
                     doc.data?.let { d ->
+                        val timestamp = d["timestamp"] as? Long ?: 0
+                        val timer = group.disappearingTimer
+                        if (timer > 0 && (System.currentTimeMillis() - timestamp) > timer) return@mapNotNull null
+
                         Message(
                             id = doc.id,
                             text = AESCrypto.decrypt(group.id, d["text"] as? String ?: ""),
                             senderMobile = d["senderMobile"] as? String ?: "",
                             receiverMobile = group.id,
-                            timestamp = d["timestamp"] as? Long ?: 0,
+                            timestamp = timestamp,
                             timeString = d["timeString"] as? String ?: "",
                             fileUrl = d["fileUrl"] as? String,
                             fileName = d["fileName"] as? String,
@@ -4491,5 +4560,135 @@ fun GroupChatArea(
             onMicCancel = { mediaRecorder?.release(); mediaRecorder = null; isRecording = false; recordingFile?.delete() }
         )
     }
+
+    if (showForwardDialog) {
+        ForwardMessageDialog(
+            currentUser = currentUser,
+            messages = messages.filter { it.id in selectedMessages },
+            onDismiss = { showForwardDialog = false },
+            onForwardComplete = { showForwardDialog = false; selectedMessages = emptySet() }
+        )
+    }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun NewBroadcastDialog(onDismiss: () -> Unit, currentUser: User) {
+    val db = remember { com.google.firebase.firestore.FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    var selectedMembers by remember { mutableStateOf(setOf<String>()) }
+    var allUsers by remember { mutableStateOf(emptyList<User>()) }
+    var step by remember { mutableIntStateOf(0) }
+    var messageText by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        db.collection("chat_users").get().addOnSuccessListener { snap ->
+            allUsers = snap.documents.mapNotNull {
+                val u = User(
+                    uid = it.id, name = it.getString("name") ?: "",
+                    mobile = it.getString("mobile") ?: "", avatarUrl = it.getString("avatarUrl") ?: ""
+                )
+                if (u.mobile != currentUser.mobile) u else null
+            }
+        }
+    }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.Background) {
+            Column {
+                // App Bar
+                Row(modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { if (step == 1) step = 0 else onDismiss() }) {
+                        Icon(androidx.compose.material.icons.Icons.Default.ArrowBack, null, tint = Color.White)
+                    }
+                    Text(if (step == 0) "New Broadcast" else "Compose Message", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (step == 0 && selectedMembers.isNotEmpty()) {
+                        FloatingActionButton(onClick = { step = 1 }, modifier = Modifier.size(44.dp), containerColor = RasGramTheme.Green) {
+                            Icon(androidx.compose.material.icons.Icons.Default.ArrowForward, null, tint = Color.White)
+                        }
+                    }
+                }
+
+                if (step == 0) {
+                    // Select members
+                    if (selectedMembers.isNotEmpty()) {
+                        LazyRow(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items(allUsers.filter { it.mobile in selectedMembers }) { u ->
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box {
+                                        coil.compose.AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                        IconButton(onClick = { selectedMembers = selectedMembers - u.mobile }, modifier = Modifier.size(20.dp).align(Alignment.BottomEnd).background(RasGramTheme.DarkPanel, androidx.compose.foundation.shape.CircleShape)) {
+                                            Icon(androidx.compose.material.icons.Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                    Text(u.name, style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextPrimary)
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = RasGramTheme.Border)
+                    }
+
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(allUsers) { u ->
+                            val isSelected = u.mobile in selectedMembers
+                            Row(modifier = Modifier.fillMaxWidth().clickable {
+                                selectedMembers = if (isSelected) selectedMembers - u.mobile else selectedMembers + u.mobile
+                            }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                coil.compose.AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(u.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, modifier = Modifier.weight(1f))
+                                if (isSelected) Icon(androidx.compose.material.icons.Icons.Default.CheckCircle, null, tint = RasGramTheme.Green)
+                            }
+                        }
+                    }
+                } else {
+                    // Compose message
+                    Column(modifier = Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Broadcast to ${selectedMembers.size} recipients", color = RasGramTheme.TextMuted, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = messageText,
+                            onValueChange = { messageText = it },
+                            placeholder = { Text("Type a message") },
+                            modifier = Modifier.fillMaxWidth().height(150.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = RasGramTheme.TextPrimary, fontSize = 16.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RasGramTheme.Green,
+                                unfocusedBorderColor = RasGramTheme.Border,
+                                focusedContainerColor = RasGramTheme.DarkPanel,
+                                unfocusedContainerColor = RasGramTheme.DarkPanel
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = {
+                                if (messageText.isNotBlank()) {
+                                    scope.launch {
+                                        selectedMembers.forEach { receiverMobile ->
+                                            val chatId = generateChatId(currentUser.mobile, receiverMobile)
+                                            val msg = Message(
+                                                id = java.util.UUID.randomUUID().toString(),
+                                                text = AESCrypto.encrypt(chatId, messageText),
+                                                senderMobile = currentUser.mobile,
+                                                receiverMobile = receiverMobile,
+                                                timestamp = System.currentTimeMillis(),
+                                                timeString = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+                                            )
+                                            db.collection("pvt_msg_${chatId}").add(msg)
+                                        }
+                                        onDismiss()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Send Broadcast", color = Color.Black, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
