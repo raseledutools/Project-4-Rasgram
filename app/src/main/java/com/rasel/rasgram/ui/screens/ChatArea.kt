@@ -551,6 +551,44 @@ fun ChatArea(
             onAudio = { docLauncher.launch(arrayOf("audio/*")); showAttachMenu = false }
         )
     }
+
+    // Summarize chat dialog
+    if (showSummarizeDialog) {
+        Dialog(onDismissRequest = { showSummarizeDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = RasGramTheme.DarkPanel,
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text(
+                        text = "Chat Summary",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = RasGramTheme.Green,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (isSummarizing) {
+                        CircularProgressIndicator(color = RasGramTheme.Green, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    } else {
+                        Text(
+                            text = chatSummary ?: "Failed to generate summary.",
+                            color = RasGramTheme.TextPrimary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { showSummarizeDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Close", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
 }
 
 
@@ -723,43 +761,6 @@ fun ReplyPreview(message: Message, currentUserMobile: String, onDismiss: () -> U
         }
     }
 
-    if (showSummarizeDialog) {
-        Dialog(onDismissRequest = { showSummarizeDialog = false }) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = RasGramTheme.DarkPanel,
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text(
-                        text = "Chat Summary",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = RasGramTheme.Green,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    if (isSummarizing) {
-                        CircularProgressIndicator(color = RasGramTheme.Green, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    } else {
-                        Text(
-                            text = chatSummary ?: "Failed to generate summary.",
-                            color = RasGramTheme.TextPrimary,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = { showSummarizeDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green),
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("Close", color = Color.White)
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun ChatInputBar(
