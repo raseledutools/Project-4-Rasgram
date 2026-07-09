@@ -76,13 +76,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
+import kotlin.math.roundToInt
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
@@ -298,6 +303,10 @@ class MainActivity : FragmentActivity() {
         db.firestoreSettings = settings
 
         setContent { RasGramApp() }
+    }
+
+    companion object {
+        var isVideoCallActive = false
     }
 }
 
@@ -1431,6 +1440,7 @@ fun ChatsHeader(
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onNewGroupClick: () -> Unit,
+    onNewBroadcastClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit
@@ -1461,6 +1471,11 @@ fun ChatsHeader(
                     text = { Text("New Group", color = RasGramTheme.TextPrimary) },
                     leadingIcon = { Icon(Icons.Default.People, null, tint = RasGramTheme.TextMuted) },
                     onClick = { onNewGroupClick(); showMenu = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("New Broadcast", color = RasGramTheme.TextPrimary) },
+                    leadingIcon = { Icon(Icons.Default.Campaign, null, tint = RasGramTheme.TextMuted) },
+                    onClick = { onNewBroadcastClick(); showMenu = false }
                 )
                 DropdownMenuItem(
                     text = { Text("Settings", color = RasGramTheme.TextPrimary) },
@@ -4594,7 +4609,7 @@ fun NewBroadcastDialog(onDismiss: () -> Unit, currentUser: User) {
     }
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.Background) {
+        Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.DarkBackground) {
             Column {
                 // App Bar
                 Row(modifier = Modifier.fillMaxWidth().background(RasGramTheme.DarkPanel).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4616,7 +4631,7 @@ fun NewBroadcastDialog(onDismiss: () -> Unit, currentUser: User) {
                             items(allUsers.filter { it.mobile in selectedMembers }) { u ->
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box {
-                                        coil.compose.AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                        AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                                         IconButton(onClick = { selectedMembers = selectedMembers - u.mobile }, modifier = Modifier.size(20.dp).align(Alignment.BottomEnd).background(RasGramTheme.DarkPanel, androidx.compose.foundation.shape.CircleShape)) {
                                             Icon(androidx.compose.material.icons.Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(14.dp))
                                         }
@@ -4634,7 +4649,7 @@ fun NewBroadcastDialog(onDismiss: () -> Unit, currentUser: User) {
                             Row(modifier = Modifier.fillMaxWidth().clickable {
                                 selectedMembers = if (isSelected) selectedMembers - u.mobile else selectedMembers + u.mobile
                             }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                coil.compose.AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                AsyncImage(model = u.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${u.name}" }, contentDescription = null, modifier = Modifier.size(50.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Text(u.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, modifier = Modifier.weight(1f))
                                 if (isSelected) Icon(androidx.compose.material.icons.Icons.Default.CheckCircle, null, tint = RasGramTheme.Green)
