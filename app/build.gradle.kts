@@ -4,6 +4,7 @@ plugins {
     // Compose plugin version Kotlin version (2.1.10) এর সাথে মিল থাকতে হবে
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.10"
     id("com.google.gms.google-services") version "4.4.2"
+    id("com.google.devtools.ksp") version "2.1.10-1.0.29"
 }
 
 android {
@@ -159,6 +160,18 @@ dependencies {
     // OkHttp + Google Auth
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
     implementation("com.google.auth:google-auth-library-oauth2-http:1.19.0")
+
+    // ─── Room Database ────────────────────────────────────────────────────────
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+
+    // ─── AI Integration ───────────────────────────────────────────────────────
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    
+    // Gson for TypeConverters
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // ─── Testing ──────────────────────────────────────────────────────────────
     testImplementation("junit:junit:4.13.2")
