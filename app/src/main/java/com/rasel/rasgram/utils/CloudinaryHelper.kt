@@ -1,4 +1,4 @@
-﻿package com.rasel.rasgram
+package com.rasel.rasgram
 
 import android.Manifest
 import java.security.MessageDigest
@@ -140,7 +140,7 @@ suspend fun uploadToCloudinary(
             override fun contentLength() = tempFile.length()
             override fun writeTo(sink: okio.BufferedSink) {
                 val buf = okio.Buffer()
-                // FIX #4: was okio.Okio.source(tempFile) â€” now extension function tempFile.source()
+                // FIX #4: was okio.Okio.source(tempFile) Ã¢â‚¬â€ now extension function tempFile.source()
                 val src = tempFile.source()
                 val total = tempFile.length()
                 var uploaded = 0L
@@ -157,21 +157,25 @@ suspend fun uploadToCloudinary(
 
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("file", fileName, fileBody)
+            .addFormDataPart("file", fileName, progressBody)
             .addFormDataPart("upload_preset", CLOUDINARY_UPLOAD_PRESET)
             .build()
 
         val request = Request.Builder().url(CLOUDINARY_UPLOAD_URL).post(requestBody).build()
         val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: return@withContext Triple(null, null, null)
+        val responseBody = response.body?.string()
 
-        if (!response.isSuccessful) return@withContext Triple(null, null, null)
+        if (!response.isSuccessful || responseBody == null) {
+            println("Cloudinary error: ${response.code} $responseBody")
+            return@withContext Triple(null, null, null)
+        }
 
         val json = JSONObject(responseBody)
         val url = json.optString("secure_url", null)
         tempFile.delete()
         Triple(url, fileName, mimeType)
     } catch (e: Exception) {
+        println("Cloudinary Exception: ${e.message}")
         Triple(null, null, null)
     }
 }
