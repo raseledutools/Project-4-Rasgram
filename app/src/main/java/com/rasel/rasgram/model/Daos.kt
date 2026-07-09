@@ -5,6 +5,10 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
+import com.rasel.rasgram.User
+import com.rasel.rasgram.Message
+import com.rasel.rasgram.Status
+import com.rasel.rasgram.Group
 
 @Dao
 interface UserDao {
