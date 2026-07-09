@@ -891,6 +891,7 @@ fun RecordingWaveAnimation() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachmentMenuSheet(
     onDismiss: () -> Unit,
@@ -898,28 +899,27 @@ fun AttachmentMenuSheet(
     onDocument: () -> Unit,
     onAudio: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = RasGramTheme.DarkPanel
-        ) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Text("Share", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(20.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    AttachOption(Icons.Default.Image, "Photos & Videos", RasGramTheme.Orange, onImageVideo)
-                    AttachOption(Icons.Default.InsertDriveFile, "Document", Color(0xFF6C63FF), onDocument)
-                    AttachOption(Icons.Default.AudioFile, "Audio", Color(0xFF00BFA5), onAudio)
-                    AttachOption(Icons.Default.Camera, "Camera", RasGramTheme.Green, onDismiss)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    AttachOption(Icons.Default.LocationOn, "Location", RasGramTheme.Red, onDismiss)
-                    AttachOption(Icons.Default.ContactPage, "Contact", Color(0xFF2196F3), onDismiss)
-                    AttachOption(Icons.Default.Poll, "Poll", Color(0xFFFF9800), onDismiss)
-                    AttachOption(Icons.Default.Gif, "GIF", Color(0xFF9C27B0), onDismiss)
-                }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = RasGramTheme.DarkPanel,
+        scrimColor = Color.Black.copy(alpha = 0.5f)
+    ) {
+        Column(modifier = Modifier.padding(bottom = 32.dp, top = 8.dp, start = 24.dp, end = 24.dp)) {
+            Text("Share", style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, 
+fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                AttachOption(Icons.Default.Image, "Photos & Videos", RasGramTheme.Orange, onImageVideo)
+                AttachOption(Icons.Default.InsertDriveFile, "Document", Color(0xFF6C63FF), onDocument)
+                AttachOption(Icons.Default.AudioFile, "Audio", Color(0xFF00BFA5), onAudio)
+                AttachOption(Icons.Default.Camera, "Camera", RasGramTheme.Green, onDismiss)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                AttachOption(Icons.Default.LocationOn, "Location", RasGramTheme.Red, onDismiss)
+                AttachOption(Icons.Default.ContactPage, "Contact", Color(0xFF2196F3), onDismiss)
+                AttachOption(Icons.Default.Poll, "Poll", Color(0xFFFF9800), onDismiss)
+                AttachOption(Icons.Default.Gif, "GIF", Color(0xFF9C27B0), onDismiss)
             }
         }
     }
