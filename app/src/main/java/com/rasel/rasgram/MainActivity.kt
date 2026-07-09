@@ -186,6 +186,7 @@ data class Group(
     val description: String = "",
     val members: List<String> = emptyList(),
     val admins: List<String> = emptyList(),
+    val typingUsers: List<String> = emptyList(),
     val createdBy: String = "",
     val createdAt: Long = 0
 )
@@ -274,7 +275,17 @@ object AESCrypto {
     }
 }
 
-class MainActivity : ComponentActivity() {
+import androidx.fragment.app.FragmentActivity
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
+import androidx.biometric.BiometricPrompt
+import androidx.biometric.BiometricManager
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FirebaseApp.initializeApp(this)
@@ -292,7 +303,102 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ==================== ROOT APP ====================
+object RemoteConfigManager {
+    private val mFirebaseRemoteConfig = FirebaseRemoteConfig.getInstance()
+    
+    init {
+        val configSettings = FirebaseRemoteConfigSettings.Builder()
+            .setMinimumFetchIntervalInSeconds(0) // 0 for testing, 3600 for prod
+            .build()
+        mFirebaseRemoteConfig.setConfigSettingsAsync(configSettings)
+        
+        // Default values
+        val defaults = mapOf(
+            "primary_color_hex" to "#008069",
+            "show_status_tab" to true
+        )
+        mFirebaseRemoteConfig.setDefaultsAsync(defaults)
+    }
+
+    fun fetchAndActivate(onComplete: (Boolean) -> Unit) {
+        mFirebaseRemoteConfig.fetchAndActivate()
+            .addOnCompleteListener { task ->
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun getPrimaryColor(): String {
+        return mFirebaseRemoteConfig.getString("primary_color_hex").ifEmpty { "#008069" }
+    }
+}
+
+// ==================== APP ENTRY POINT ====================
+
+@Composable
+fun AppLockScreen(onUnlocked: () -> Unit) {
+    val context = LocalContext.current
+    var errorMsg by remember { mutableStateOf("") }
+    
+    fun showBiometricPrompt() {
+        val biometricManager = BiometricManager.from(context)
+        if (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL) != BiometricManager.BIOMETRIC_SUCCESS) {
+            // No biometric hardware or not enrolled, just unlock for now
+            onUnlocked()
+            return
+        }
+        
+        val executor = ContextCompat.getMainExecutor(context)
+        val prompt = BiometricPrompt(context as FragmentActivity, executor, object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                super.onAuthenticationError(errorCode, errString)
+                errorMsg = "Authentication error: $errString"
+            }
+
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                super.onAuthenticationSucceeded(result)
+                onUnlocked()
+            }
+
+            override fun onAuthenticationFailed() {
+                super.onAuthenticationFailed()
+                errorMsg = "Authentication failed."
+            }
+        })
+        
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("RasGram Locked")
+            .setSubtitle("Authenticate to access your chats")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+            
+        prompt.authenticate(promptInfo)
+    }
+
+    LaunchedEffect(Unit) {
+        showBiometricPrompt()
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.DarkBackground) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.Lock, contentDescription = "Locked", tint = RasGramTheme.Green, modifier = Modifier.size(80.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("RasGram is locked", color = Color.White, style = MaterialTheme.typography.titleLarge)
+            if (errorMsg.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(errorMsg, color = RasGramTheme.Red)
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(onClick = { showBiometricPrompt() }, colors = ButtonDefaults.buttonColors(containerColor = RasGramTheme.Green)) {
+                Text("Unlock", color = Color.Black)
+            }
+        }
+    }
+}
+
 @Composable
 fun RasGramApp() {
     val context = LocalContext.current
@@ -317,15 +423,41 @@ fun RasGramApp() {
     }
     var isDarkMode by remember { mutableStateOf(true) }
 
+    var isAppUnlocked by remember { mutableStateOf(false) }
+    var remotePrimaryColor by remember { mutableStateOf(RemoteConfigManager.getPrimaryColor()) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                isAppUnlocked = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(Unit) {
+        RemoteConfigManager.fetchAndActivate {
+            remotePrimaryColor = RemoteConfigManager.getPrimaryColor()
+        }
+    }
+
+    val dynamicPrimaryColor = try {
+        Color(android.graphics.Color.parseColor(remotePrimaryColor))
+    } catch (e: Exception) {
+        RasGramTheme.Green
+    }
+
     MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme(
-        primary = RasGramTheme.Green,
+        primary = dynamicPrimaryColor,
         secondary = RasGramTheme.GreenDark,
         background = RasGramTheme.DarkBackground,
         surface = RasGramTheme.DarkPanel,
         onBackground = RasGramTheme.TextPrimary,
         onSurface = RasGramTheme.TextPrimary
     ) else lightColorScheme(
-        primary = RasGramTheme.Green,
+        primary = dynamicPrimaryColor,
         secondary = RasGramTheme.GreenDark
     )) {
         if (!isLoggedIn || currentUser == null) {
@@ -333,14 +465,17 @@ fun RasGramApp() {
                 onLogin = { user ->
                     prefs.edit()
                         .putString(PREF_MOBILE, user.mobile)
-                        .putString(PREF_NAME_KEY, user.name)
                         .putString(PREF_UID, user.uid)
+                        .putString(PREF_NAME_KEY, user.name)
                         .putString(PREF_AVATAR, user.avatarUrl)
                         .apply()
                     currentUser = user
                     isLoggedIn = true
+                    isAppUnlocked = true // Unlock app immediately after login
                 }
             )
+        } else if (!isAppUnlocked) {
+            AppLockScreen(onUnlocked = { isAppUnlocked = true })
         } else {
             MainScreen(
                 currentUser = currentUser!!,
@@ -348,9 +483,9 @@ fun RasGramApp() {
                 onToggleTheme = { isDarkMode = !isDarkMode },
                 onLogout = {
                     prefs.edit().clear().apply()
-                    FirebaseAuth.getInstance().signOut()
                     isLoggedIn = false
                     currentUser = null
+                    isAppUnlocked = false
                 },
                 onUserUpdate = { updated ->
                     currentUser = updated
@@ -1678,7 +1813,7 @@ fun ChatArea(
                         selectedMessages = emptySet()
                     }
                 },
-                onForward = { /* Forward logic */ },
+                onForward = { showForwardDialog = true },
                 onStar = {
                     scope.launch {
                         selectedMessages.forEach { id ->
@@ -2910,6 +3045,7 @@ fun GroupsTab(currentUser: User, onGroupSelect: (Group) -> Unit, modifier: Modif
                             description = d["description"] as? String ?: "",
                             members = (d["members"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                             admins = (d["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            typingUsers = (d["typingUsers"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                             createdBy = d["createdBy"] as? String ?: "",
                             createdAt = d["createdAt"] as? Long ?: 0
                         )
@@ -3248,6 +3384,139 @@ fun CallControlButton(icon: ImageVector, label: String, isActive: Boolean, activ
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(label, color = RasGramTheme.TextMuted, style = MaterialTheme.typography.labelSmall)
+    }
+
+    if (showForwardDialog) {
+        ForwardMessageDialog(
+            currentUser = currentUser,
+            messages = messages.filter { it.id in selectedMessages },
+            onDismiss = { showForwardDialog = false },
+            onForwardComplete = { showForwardDialog = false; selectedMessages = emptySet() }
+        )
+    }
+}
+
+// ==================== FORWARD MESSAGE DIALOG ====================
+@Composable
+fun ForwardMessageDialog(
+    currentUser: User,
+    messages: List<Message>,
+    onDismiss: () -> Unit,
+    onForwardComplete: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
+    var contacts by remember { mutableStateOf<List<User>>(emptyList()) }
+    var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
+    var isSending by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(Unit) {
+        // Fetch contacts
+        db.collection("chat_users").get().addOnSuccessListener { snap ->
+            contacts = snap.documents.mapNotNull { doc ->
+                doc.data?.let { d ->
+                    User(
+                        uid = doc.id, name = d["name"] as? String ?: "",
+                        mobile = d["mobile"] as? String ?: "", avatarUrl = d["avatarUrl"] as? String ?: ""
+                    )
+                }
+            }.filter { it.mobile != currentUser.mobile }
+        }
+        
+        // Fetch groups
+        db.collection("groups").whereArrayContains("members", currentUser.mobile).get().addOnSuccessListener { snap ->
+            groups = snap.documents.mapNotNull { doc ->
+                doc.data?.let { d ->
+                    Group(
+                        id = doc.id, name = d["name"] as? String ?: "",
+                        avatarUrl = d["avatarUrl"] as? String ?: "", description = d["description"] as? String ?: "",
+                        members = (d["members"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        admins = (d["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        createdBy = d["createdBy"] as? String ?: "",
+                        createdAt = d["createdAt"] as? Long ?: 0
+                    )
+                }
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 500.dp), shape = RoundedCornerShape(20.dp), color = RasGramTheme.DarkPanel) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Forward to...", style = MaterialTheme.typography.titleLarge, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                if (isSending) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = RasGramTheme.Green)
+                    }
+                } else {
+                    LazyColumn {
+                        // Contacts
+                        if (contacts.isNotEmpty()) {
+                            item { Text("Contacts", color = RasGramTheme.Green, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 8.dp)) }
+                            items(contacts, key = { "contact_${it.mobile}" }) { contact ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        isSending = true
+                                        scope.launch {
+                                            val chatId = if (currentUser.mobile < contact.mobile) "${currentUser.mobile}_${contact.mobile}" else "${contact.mobile}_${currentUser.mobile}"
+                                            messages.forEach { msg ->
+                                                val fwdText = "[Forwarded]\n" + (msg.text.ifEmpty { "Media/Voice Note" })
+                                                sendMessage(db, chatId, currentUser.mobile, contact.mobile, fwdText, msg.fileUrl, msg.fileName, msg.fileType, null, null, null, msg.duration)
+                                                delay(100) // slight delay to ensure order
+                                            }
+                                            isSending = false
+                                            onForwardComplete()
+                                        }
+                                    }.padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(model = contact.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${contact.name.replace(" ", "+")}&background=008069&color=fff" }, contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(contact.name, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                        
+                        // Groups
+                        if (groups.isNotEmpty()) {
+                            item { Text("Groups", color = RasGramTheme.Green, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 8.dp)) }
+                            items(groups, key = { "group_${it.id}" }) { group ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        isSending = true
+                                        scope.launch {
+                                            messages.forEach { msg ->
+                                                val fwdText = "[Forwarded]\n" + (msg.text.ifEmpty { "Media/Voice Note" })
+                                                val encryptedText = AESCrypto.encrypt(group.id, fwdText)
+                                                val now = System.currentTimeMillis()
+                                                val msgMap = hashMapOf(
+                                                    "text" to encryptedText, "senderMobile" to currentUser.mobile,
+                                                    "fileUrl" to msg.fileUrl, "fileName" to msg.fileName,
+                                                    "fileType" to msg.fileType, "duration" to msg.duration,
+                                                    "timestamp" to now, "timeString" to java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(now))
+                                                )
+                                                db.collection("groups").document(group.id).collection("messages").add(msgMap)
+                                                db.collection("groups").document(group.id).update("lastMessageTime", now)
+                                                delay(100)
+                                            }
+                                            isSending = false
+                                            onForwardComplete()
+                                        }
+                                    }.padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" }, contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(group.name, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3977,11 +4246,14 @@ fun GroupChatArea(
     var uploadProgress by remember { mutableFloatStateOf(0f) }
     var replyToMessage by remember { mutableStateOf<Message?>(null) }
     var selectedMessages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showForwardDialog by remember { mutableStateOf(false) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableIntStateOf(0) }
     var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile by remember { mutableStateOf<File?>(null) }
+    var typingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var liveGroup by remember { mutableStateOf(group) }
 
     // Group members cache for name mapping
     var membersMap by remember { mutableStateOf<Map<String, User>>(emptyMap()) }
@@ -4003,6 +4275,15 @@ fun GroupChatArea(
                     }
                 }
                 membersMap = map
+            }
+        }
+
+        db.collection("groups").document(group.id).addSnapshotListener { snap, _ ->
+            snap?.data?.let { d ->
+                liveGroup = liveGroup.copy(
+                    name = d["name"] as? String ?: liveGroup.name,
+                    typingUsers = (d["typingUsers"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                )
             }
         }
 
@@ -4054,7 +4335,7 @@ fun GroupChatArea(
                         selectedMessages = emptySet()
                     }
                 },
-                onForward = { }, onStar = { },
+                onForward = { showForwardDialog = true }, onStar = { },
                 onCopy = {
                     val text = messages.filter { it.id in selectedMessages }.joinToString("\n") { it.text }
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -4067,14 +4348,24 @@ fun GroupChatArea(
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (isCompact) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = RasGramTheme.TextPrimary) } }
                     AsyncImage(
-                        model = group.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${group.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
+                        model = liveGroup.avatarUrl.ifEmpty { "https://ui-avatars.com/api/?name=${liveGroup.name.replace(" ", "+")}&background=005C4B&color=fff&bold=true" },
                         contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(group.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${group.members.size} members", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+                        Text(liveGroup.name, style = MaterialTheme.typography.titleMedium, color = RasGramTheme.TextPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        
+                        val otherTypingUsers = liveGroup.typingUsers.filter { it != currentUser.mobile }
+                        val subtitle = if (otherTypingUsers.isNotEmpty()) {
+                            val typingNames = otherTypingUsers.map { membersMap[it]?.name ?: it }
+                            "${typingNames.joinToString(", ")} is typing..."
+                        } else {
+                            "${liveGroup.members.size} members"
+                        }
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = if (otherTypingUsers.isNotEmpty()) RasGramTheme.Green else RasGramTheme.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    IconButton(onClick = { /* Call feature in group */ }) { Icon(Icons.Default.Call, null, tint = RasGramTheme.Green) }
+                    IconButton(onClick = { /* Group info */ }) { Icon(Icons.Default.MoreVert, null, tint = RasGramTheme.TextMuted) }
                 }
             }
         }
@@ -4114,7 +4405,21 @@ fun GroupChatArea(
 
         ChatInputBar(
             inputText = inputText,
-            onTextChange = { inputText = it },
+            onTextChange = { text ->
+                inputText = text
+                if (text.isNotEmpty()) {
+                    typingJob?.cancel()
+                    typingJob = scope.launch {
+                        db.collection("groups").document(group.id).update(
+                            "typingUsers", com.google.firebase.firestore.FieldValue.arrayUnion(currentUser.mobile)
+                        )
+                        delay(2000L) // TYPING_DEBOUNCE_MS
+                        db.collection("groups").document(group.id).update(
+                            "typingUsers", com.google.firebase.firestore.FieldValue.arrayRemove(currentUser.mobile)
+                        )
+                    }
+                }
+            },
             onSend = {
                 val text = inputText.trim()
                 if (text.isNotBlank()) {
@@ -4130,6 +4435,12 @@ fun GroupChatArea(
                     db.collection("groups").document(group.id).update("lastMessageTime", now)
                     inputText = ""
                     replyToMessage = null
+                    typingJob?.cancel()
+                    scope.launch {
+                        db.collection("groups").document(group.id).update(
+                            "typingUsers", com.google.firebase.firestore.FieldValue.arrayRemove(currentUser.mobile)
+                        )
+                    }
                 }
             },
             onAttachClick = { showAttachMenu = true },

@@ -148,8 +148,10 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-config-ktx")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
 
     // ─── WebRTC ─────────────────────────────────────────────────────────────
     implementation("io.getstream:stream-webrtc-android:1.1.1")
