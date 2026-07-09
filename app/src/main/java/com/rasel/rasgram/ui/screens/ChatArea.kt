@@ -760,7 +760,7 @@ fun ReplyPreview(message: Message, currentUserMobile: String, onDismiss: () -> U
             }
         }
     }
-
+}
 
 @Composable
 fun ChatInputBar(
