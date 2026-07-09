@@ -136,7 +136,7 @@ class SyncManager(private val context: Context, private val currentUserMobile: S
                         isCallLog = doc.getBoolean("isCallLog") ?: false,
                         callStatus = doc.getString("callStatus"),
                         callType = doc.getString("callType"),
-                        isPending = doc.getBoolean("isPending") ?: false,
+                        isPending = doc.metadata.hasPendingWrites(),
                         replyToId = doc.getString("replyToId"),
                         replyToText = doc.getString("replyToText"),
                         replyToSender = doc.getString("replyToSender"),
