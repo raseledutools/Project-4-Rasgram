@@ -511,7 +511,7 @@ fun PhoneInputStep(
     errorMsg: String,
     onNext: () -> Unit
 ) {
-    val countryCodes = listOf("+880" to "🇧🇩 BD", "+1" to "🇺🇸 US", "+44" to "🇬🇧 UK", "+91" to "🇮🇳 IN", "+971" to "🇦🇪 AE", "+966" to "🇸🇦 SA")
+    val countryCodes = listOf("+880" to "ðŸ‡§ðŸ‡© BD", "+1" to "ðŸ‡ºðŸ‡¸ US", "+44" to "ðŸ‡¬ðŸ‡§ UK", "+91" to "ðŸ‡®ðŸ‡³ IN", "+971" to "ðŸ‡¦ðŸ‡ª AE", "+966" to "ðŸ‡¸ðŸ‡¦ SA")
     var showDropdown by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(countryCodes[0]) }
 
