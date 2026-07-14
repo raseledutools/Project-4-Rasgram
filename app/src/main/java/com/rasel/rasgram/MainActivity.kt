@@ -480,60 +480,124 @@ fun OtpLoginScreen(onLogin: (User) -> Unit) {
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = RasGramTheme.DarkBackground) {
+    // WhatsApp-style gradient background
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Background gradient
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            RasGramTheme.GreenDark.copy(alpha = 0.3f),
+                            RasGramTheme.DarkBackground
+                        )
+                    )
+                )
+        )
+        
+        // Decorative circles
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = (-100).dp)
+                .size(300.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(RasGramTheme.Green.copy(alpha = 0.15f), Color.Transparent)
+                    ),
+                    shape = CircleShape
+                )
+        )
+        
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-50).dp, y = (-100).dp)
+                .size(200.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(RasGramTheme.GreenLight.copy(alpha = 0.1f), Color.Transparent)
+                    ),
+                    shape = CircleShape
+                )
+        )
+
+        // Main content
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(60.dp))
+            Spacer(modifier = Modifier.height(80.dp))
 
             // Logo + Header
-            Box(
-                modifier = Modifier
-                    .size(110.dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(RasGramTheme.Green.copy(alpha = 0.3f), Color.Transparent)
-                        ),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(100.dp),
+                shape = CircleShape,
+                color = RasGramTheme.Green,
+                shadowElevation = 16.dp
             ) {
-                Surface(modifier = Modifier.size(88.dp), shape = CircleShape, color = RasGramTheme.GreenDark) {
-                    Icon(Icons.Default.Send, contentDescription = "Logo", tint = Color.White, modifier = Modifier.padding(22.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = "Logo",
+                        tint = Color.White,
+                        modifier = Modifier.size(56.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
             Text(
                 "RasGram",
                 style = MaterialTheme.typography.headlineLarge,
                 color = RasGramTheme.TextPrimary,
                 fontWeight = FontWeight.ExtraBold,
-                fontSize = 34.sp
+                fontSize = 36.sp,
+                letterSpacing = 0.5.sp
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
             Text(
-                when (step) {
-                    0 -> "Enter your phone number"
-                    1 -> "What's your name?"
-                    else -> "Enter verification code"
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = RasGramTheme.TextMuted,
+                "Simple. Secure. Reliable.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = RasGramTheme.Green,
+                fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                when (step) {
+                    0 -> "Enter your phone number to continue"
+                    1 -> "What should we call you?"
+                    else -> "Enter the verification code"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = RasGramTheme.TextMuted,
+                textAlign = TextAlign.Center,
+                lineHeight = 22.sp
+            )
 
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = RasGramTheme.DarkPanel),
-                elevation = CardDefaults.cardElevation(8.dp)
+            Spacer(modifier = Modifier.height(40.dp))
+
+            // Card with glassmorphism effect
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = RasGramTheme.DarkPanel.copy(alpha = 0.8f)
+                ),
+                shadowElevation = 12.dp,
+                border = BorderStroke(1.dp, RasGramTheme.Border.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
+                Column(modifier = Modifier.padding(28.dp)) {
                     AnimatedContent(targetState = step, label = "step") { currentStep ->
                         when (currentStep) {
                             0 -> PhoneInputStep(
@@ -574,12 +638,35 @@ fun OtpLoginScreen(onLogin: (User) -> Unit) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = RasGramTheme.Green)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("End-to-end encrypted", style = MaterialTheme.typography.bodySmall, color = RasGramTheme.TextMuted)
+            Spacer(modifier = Modifier.height(36.dp))
+            
+            // Security badge
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = RasGramTheme.Green.copy(alpha = 0.1f),
+                border = BorderStroke(1.dp, RasGramTheme.Green.copy(alpha = 0.3f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Lock,
+                        null,
+                        modifier = Modifier.size(16.dp),
+                        tint = RasGramTheme.Green
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "End-to-end encrypted",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RasGramTheme.Green,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
+            
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
@@ -3705,12 +3792,28 @@ fun sendMessage(
     val encryptedReply = replyToText?.let { AESCrypto.encrypt(chatId, it) }
 
     val now = System.currentTimeMillis()
+    // WhatsApp-style time format (e.g., "10:30 AM", "Yesterday", "12/07/25")
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = now
+    val timeString = when {
+        // Today: Show time like "10:30 AM"
+        isToday(now) -> SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
+        // Yesterday: Show "Yesterday"
+        isYesterday(now) -> "Yesterday"
+        // This week: Show day name like "Monday"
+        isThisWeek(now) -> SimpleDateFormat("EEEE", Locale.getDefault()).format(Date(now))
+        // This year: Show date like "12/07/25"
+        isThisYear(now) -> SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(Date(now))
+        // Older: Show full date
+        else -> SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(now))
+    }
+    
     val message = hashMapOf(
         "text" to encryptedText,
         "senderMobile" to senderMobile,
         "receiverMobile" to receiverMobile,
         "timestamp" to now,
-        "timeString" to SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now)),
+        "timeString" to timeString,
         "fileUrl" to fileUrl,
         "fileName" to fileName,
         "fileType" to fileType,
@@ -3727,6 +3830,54 @@ fun sendMessage(
         "duration" to duration
     )
     db.collection("pvt_msg_$chatId").add(message)
+}
+
+// Helper functions for WhatsApp-style date formatting
+fun isToday(timestamp: Long): Boolean {
+    val today = Calendar.getInstance()
+    today.set(Calendar.HOUR_OF_DAY, 0)
+    today.set(Calendar.MINUTE, 0)
+    today.set(Calendar.SECOND, 0)
+    today.set(Calendar.MILLISECOND, 0)
+    return timestamp >= today.timeInMillis
+}
+
+fun isYesterday(timestamp: Long): Boolean {
+    val yesterday = Calendar.getInstance()
+    yesterday.add(Calendar.DAY_OF_YEAR, -1)
+    yesterday.set(Calendar.HOUR_OF_DAY, 0)
+    yesterday.set(Calendar.MINUTE, 0)
+    yesterday.set(Calendar.SECOND, 0)
+    yesterday.set(Calendar.MILLISECOND, 0)
+    
+    val today = Calendar.getInstance()
+    today.set(Calendar.HOUR_OF_DAY, 0)
+    today.set(Calendar.MINUTE, 0)
+    today.set(Calendar.SECOND, 0)
+    today.set(Calendar.MILLISECOND, 0)
+    
+    return timestamp >= yesterday.timeInMillis && timestamp < today.timeInMillis
+}
+
+fun isThisWeek(timestamp: Long): Boolean {
+    val calendar = Calendar.getInstance()
+    calendar.set(Calendar.HOUR_OF_DAY, 0)
+    calendar.set(Calendar.MINUTE, 0)
+    calendar.set(Calendar.SECOND, 0)
+    calendar.set(Calendar.MILLISECOND, 0)
+    
+    val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+    val daysSinceSunday = dayOfWeek - 1
+    calendar.add(Calendar.DAY_OF_YEAR, -daysSinceSunday)
+    
+    return timestamp >= calendar.timeInMillis && !isToday(timestamp) && !isYesterday(timestamp)
+}
+
+fun isThisYear(timestamp: Long): Boolean {
+    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+    val messageCalendar = Calendar.getInstance()
+    messageCalendar.timeInMillis = timestamp
+    return messageCalendar.get(Calendar.YEAR) == currentYear
 }
 
 // ==================== HELPER FUNCTIONS ====================
