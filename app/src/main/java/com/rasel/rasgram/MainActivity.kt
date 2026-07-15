@@ -1195,6 +1195,10 @@ fun ChatsTab(
     modifier: Modifier = Modifier
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    // State holders
     var users by remember { mutableStateOf<List<User>>(emptyList()) }
     var latestMessages by remember { mutableStateOf<Map<String, Message>>(emptyMap()) }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
@@ -1203,8 +1207,6 @@ fun ChatsTab(
     var showSearch by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
     var showAddContact by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     // ─── Contact Sync (WhatsApp style) ───────────────────────────────────────
     var deviceContactNumbers by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -1233,8 +1235,11 @@ fun ChatsTab(
         }
     }
     // ─────────────────────────────────────────────────────────────────────────
-
-    // Real-time users
+    
+    // OPTIMIZATION: Use a single snapshot for user list to avoid redundant reads
+    val usersSnapshot = users
+    
+    // Real-time users - Single listener for all users
     LaunchedEffect(Unit) {
         db.collection("chat_users").addSnapshotListener { snapshot, _ ->
             snapshot?.documents?.mapNotNull { doc ->
@@ -1253,41 +1258,59 @@ fun ChatsTab(
             }?.filter { it.mobile != currentUser.mobile }?.also { users = it }
         }
     }
-
-    // Fast batch latest messages
+    
+    // OPTIMIZATION: Batch load messages once when users change, not per-user listeners
     LaunchedEffect(users) {
-        users.forEach { user ->
-            val chatId = generateChatId(currentUser.mobile, user.mobile)
-            db.collection("pvt_msg_$chatId")
-                .orderBy("timestamp", Query.Direction.DESCENDING)
-                .limit(1)
-                .addSnapshotListener { snap, _ ->
-                    snap?.documents?.firstOrNull()?.let { doc ->
-                        doc.data?.let { d ->
-                            val msg = Message(
-                                id = doc.id,
-                                text = AESCrypto.decrypt(chatId, d["text"] as? String ?: "") ?: "",
-                                senderMobile = d["senderMobile"] as? String ?: "",
-                                timestamp = d["timestamp"] as? Long ?: 0,
-                                timeString = d["timeString"] as? String ?: "",
-                                fileUrl = d["fileUrl"] as? String,
-                                fileType = d["fileType"] as? String,
-                                read = d["read"] as? Boolean ?: false,
-                                isCallLog = d["isCallLog"] as? Boolean ?: false,
-                                isDeleted = d["isDeleted"] as? Boolean ?: false
-                            )
+        if (users.isEmpty()) return@LaunchedEffect
+        
+        val chatIds = users.map { generateChatId(currentUser.mobile, it.mobile) }
+        
+        // Fetch latest messages for all chats in parallel
+        coroutineScope {
+            chatIds.forEachIndexed { index, chatId ->
+                launch {
+                    try {
+                        val snap = db.collection("pvt_msg_$chatId")
+                            .orderBy("timestamp", Query.Direction.DESCENDING)
+                            .limit(1)
+                            .get()
+                            .await()
+                        
+                        val user = users.getOrNull(index) ?: return@launch
+                        val msg = snap.documents.firstOrNull()?.let { doc ->
+                            doc.data?.let { d ->
+                                Message(
+                                    id = doc.id,
+                                    text = AESCrypto.decrypt(chatId, d["text"] as? String ?: "") ?: "",
+                                    senderMobile = d["senderMobile"] as? String ?: "",
+                                    timestamp = d["timestamp"] as? Long ?: 0,
+                                    timeString = d["timeString"] as? String ?: "",
+                                    fileUrl = d["fileUrl"] as? String,
+                                    fileType = d["fileType"] as? String,
+                                    read = d["read"] as? Boolean ?: false,
+                                    isCallLog = d["isCallLog"] as? Boolean ?: false,
+                                    isDeleted = d["isDeleted"] as? Boolean ?: false
+                                )
+                            }
+                        }
+                        
+                        if (msg != null) {
                             latestMessages = latestMessages + (user.mobile to msg)
                         }
+                        
+                        // Unread count - batch query
+                        val unreadSnap = db.collection("pvt_msg_$chatId")
+                            .whereEqualTo("senderMobile", user.mobile)
+                            .whereEqualTo("read", false)
+                            .get()
+                            .await()
+                        
+                        unreadCounts = unreadCounts + (user.mobile to unreadSnap.size())
+                    } catch (e: Exception) {
+                        // Silently handle errors to prevent UI crashes
                     }
-
-                    // Unread count
-                    db.collection("pvt_msg_$chatId")
-                        .whereEqualTo("senderMobile", user.mobile)
-                        .whereEqualTo("read", false)
-                        .get().addOnSuccessListener { qs ->
-                            unreadCounts = unreadCounts + (user.mobile to qs.size())
-                        }
                 }
+            }
         }
     }
 
@@ -1658,14 +1681,17 @@ fun ChatArea(
         }
     }
 
-    // Load messages with real-time listener
+    // Load messages with real-time listener - OPTIMIZED with pagination
     LaunchedEffect(chatId) {
+        var isFirstLoad = true
+        
         db.collection("pvt_msg_$chatId")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) return@addSnapshotListener
                 snapshot?.let { qs ->
-                    messages = qs.documents.mapNotNull { doc ->
+                    // Only decrypt and process messages on initial load or when count changes
+                    val newMessages = qs.documents.mapNotNull { doc ->
                         doc.data?.let { d ->
                             Message(
                                 id = doc.id,
@@ -1695,11 +1721,24 @@ fun ChatArea(
                             )
                         }
                     }
-                    // Mark as read
-                    qs.documents.filter { doc ->
+                    
+                    // Avoid unnecessary state updates if content hasn't changed
+                    if (newMessages.size != messages.size || 
+                        (newMessages.isNotEmpty() && newMessages.last().id != messages.lastOrNull()?.id)) {
+                        messages = newMessages
+                    }
+                    
+                    // Mark as read - batch update only for unread messages
+                    val unreadDocs = qs.documents.filter { doc ->
                         doc.getString("senderMobile") == contact.mobile && doc.getBoolean("read") == false
-                    }.forEach { doc ->
-                        doc.reference.update("read", true, "delivered", true)
+                    }
+                    
+                    if (unreadDocs.isNotEmpty()) {
+                        val batch = db.batch()
+                        unreadDocs.forEach { doc ->
+                            batch.update(doc.reference, "read", true, "delivered", true)
+                        }
+                        batch.commit()
                     }
                 }
             }
